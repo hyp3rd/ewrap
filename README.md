@@ -1,5 +1,7 @@
 # ewrap
 
+[![Go](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml/badge.svg)](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml)
+
 A sophisticated, configurable error wrapper for Go applications that provides comprehensive error handling capabilities with a focus on performance and flexibility.
 
 ## Core Features
