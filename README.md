@@ -21,7 +21,7 @@ A sophisticated, configurable error wrapper for Go applications that provides co
 ## Installation
 
 ```bash
-go get github.com/hyp3rd/errors-wrapper
+go get github.com/hyp3rd/ewrap
 ```
 
 ## Usage Examples
