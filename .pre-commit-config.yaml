@@ -12,6 +12,7 @@ repos:
       - id: debug-statements
       - id: check-yaml
         files: .*\.(yaml|yml)$
+        exclude: docs/*
         args: [--allow-multiple-documents]
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.35.1
@@ -19,7 +20,7 @@ repos:
       - id: yamllint
         files: \.(yaml|yml)$
         types: [file, yaml]
-        entry: yamllint --strict -f parsable
+        entry: yamllint -c ./.yamllint.yaml --strict -f parsable
   - repo: local
     hooks:
       - id: golangci-lint

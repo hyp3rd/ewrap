@@ -251,15 +251,9 @@ The package is designed with performance in mind:
 ## Project Structure
 
 ```txt
-├── cmd/ # Main applications
-│   └── app/ # Your application
-│       └── main.go # Application entry point
 ├── internal/ # Private code
-│   ├── pkg/ # Internal packages
-│   └── app/ # Application specific code
-├── pkg/ # Public libraries
-├── api/ # API contracts (proto files, OpenAPI specs)
-├── configs/ # Configuration files
+│   └── logger/ # Application specific code
+├── pkg/ # Public libraries)
 ├── scripts/ # Scripts for development
 ├── test/ # Additional test files
 └── docs/ # Documentation

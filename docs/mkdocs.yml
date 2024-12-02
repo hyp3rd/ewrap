@@ -1,0 +1,126 @@
+---
+site_name: ewrap Documentation
+site_description: A sophisticated, configurable error wrapper for Go applications
+site_url: https://hyp3rd.github.io/ewrap/
+repo_name: hyp3rd/ewrap
+repo_url: https://github.com/hyp3rd/ewrap
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - meta
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format:
+            format:
+              !!python/name:pymdownx.superfences.fence_code_format # yamllint disable-line rule:python-name
+
+
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+plugins:
+  - search
+  - git-revision-date-localized:
+      type: date
+  - minify:
+      minify_html: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+  - Core Features:
+      - Error Strategies: features/error-strategies.md
+      - Error Creation: features/error-creation.md
+      - Error Wrapping: features/error-wrapping.md
+      - Stack Traces: features/stack-traces.md
+      - Error Groups: features/error-groups.md
+      - Circuit Breaker: features/circuit-breaker.md
+      - Metadata: features/metadata.md
+      - Logging: features/logging.md
+  - Advanced Usage:
+      - Performance Optimization: advanced/performance.md
+      - Error Types: advanced/error-types.md
+      - Formatting: advanced/formatting.md
+      - Context Integration: advanced/context.md
+  - Examples:
+      - Basic Examples: examples/basic.md
+      - Advanced Examples: examples/advanced.md
+  - API Reference:
+      - Package Overview: api/overview.md
+      - Error Types: api/error-types.md
+      - Options: api/options.md
+      - Interfaces: api/interfaces.md
+  - Contributing: contributing.md
+  - License: license.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/hyp3rd/ewrap
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/in/francesco-cosentino/
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: Copyright &copy; 2024 Francesco Cosentino
