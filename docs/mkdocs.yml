@@ -89,7 +89,6 @@ nav:
       - Installation: getting-started/installation.md
       - Quick Start: getting-started/quickstart.md
   - Core Features:
-      - Error Strategies: features/error-strategies.md
       - Error Creation: features/error-creation.md
       - Error Wrapping: features/error-wrapping.md
       - Stack Traces: features/stack-traces.md
@@ -98,6 +97,7 @@ nav:
       - Metadata: features/metadata.md
       - Logging: features/logging.md
   - Advanced Usage:
+      - Error Strategies: advanced/error-strategies.md
       - Performance Optimization: advanced/performance.md
       - Error Types: advanced/error-types.md
       - Formatting: advanced/formatting.md
