@@ -9,13 +9,16 @@ GITVERSION_NOT_INSTALLED = "gitversion is not installed: https://github.com/GitT
 test:
 	go test -v -timeout 5m -cover ./...
 
+benchmark:
+	go test -bench=. -benchmem ./pkg/ewrap
+	go test -bench=Benchmark -benchmem ./test
+	go test -run=TestProfile -cpuprofile=cpu.prof -memprofile=mem.prof ./test
+
 update-deps:
 	go get -v -u ./...
 	go mod tidy
 
 prepare-toolchain:
-	$(call check_command_exists,docker) || (echo "Docker is missing, install it before starting to code." && exit 1)
-
 	$(call check_command_exists,git) || (echo "git is not present on the system, install it before starting to code." && exit 1)
 
 	$(call check_command_exists,go) || (echo "golang is not present on the system, download and install it at https://go.dev/dl" && exit 1)
@@ -33,9 +36,6 @@ prepare-toolchain:
 
 	@echo "Installing staticcheck...\n"
 	$(call check_command_exists,staticcheck) || go install honnef.co/go/tools/cmd/staticcheck@latest
-
-	@echo "Checking if GOPRIVATE is set correctly and contains dev.azure.com\n"
-	go env GOPRIVATE | grep dev.azure.com || (echo "GOPRIVATE does not contain dev.azure.com, setting GOPRIVATE" && go env -w GOPRIVATE=dev.azure.com/INGCDaaS/IngOne)
 
 	@echo "Checking if pre-commit is installed..."
 	pre-commit --version || (echo "pre-commit is not installed, install it with 'pip install pre-commit'" && exit 1)
@@ -60,11 +60,6 @@ lint: prepare-toolchain
 	@echo "\nRunning golangci-lint $(GOLANGCI_LINT_VERSION)..."
 	golangci-lint run ./...
 
-run:
-	$(call check_command_exists,gitversion) || (echo "${GITVERSION_NOT_INSTALLED}" && exit 1)
-	docker compose -f ../compose.yml -v down
-	export VERSION=${GITVERSION} && docker compose -f $(FILE) up --build -d
-
 # check_command_exists is a helper function that checks if a command exists.
 define check_command_exists
 @which $(1) > /dev/null 2>&1 || (echo "$(1) command not found" && exit 1)
@@ -86,4 +81,4 @@ help:
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: prepare-toolchain test vet update-deps lint help
+.PHONY: prepare-toolchain test benchmark update-deps lint help

@@ -2,7 +2,7 @@
 set -e
 
 # ######################################
-# Ensure that a go module is initiallized if not, skip the tests
+# Ensure that a go module is initialized if not, skip the tests
 # #######################################
 ensure_go_module_initialized() {
 	if [[ ! -f go.mod ]]; then
@@ -52,7 +52,7 @@ hook() {
 	pushd "${root_dir}" || exit
 
 	echo "Running golangci-lint..."
-	"${GO_BIN_PATH}"/golangci-lint run ./.. || exit 1
+	"${GO_BIN_PATH}"/golangci-lint run ./... || exit 1
 
 	popd >/dev/null || exit
 }
