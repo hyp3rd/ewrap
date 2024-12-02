@@ -8,14 +8,12 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/documentation.yml'
-      - 'mkdocs.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'docs/**'
       - '.github/workflows/documentation.yml'
-      - 'mkdocs.yml'
 
 permissions:
   contents: write
@@ -28,24 +26,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-          cache: pip
+          cache: 'pip'
+          cache-dependency-path: 'docs/requirements.txt'
 
       - name: Install dependencies
+        working-directory: docs
         run: |
-          pip install mkdocs-material
-          pip install mkdocs-git-revision-date-localized-plugin
-          pip install mkdocs-minify-plugin
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Documentation
+        working-directory: docs
+        if: github.event_name == 'pull_request'
+        run: mkdocs build
 
       - name: Deploy Documentation
+        working-directory: docs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           mkdocs gh-deploy --force
-
-      - name: Build Documentation
-        if: github.event_name == 'pull_request'
-        run: mkdocs build

@@ -67,7 +67,7 @@ markdown_extensions:
           class: mermaid
           format:
             format:
-              !!python/name:pymdownx.superfences.fence_code_format # yamllint disable-line rule:python-name
+              !!python/name:pymdownx.superfences.fence_code_format # yamllint disable-line rule:unresolved-tag
 
 
   - pymdownx.tabbed:
