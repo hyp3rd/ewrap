@@ -102,6 +102,7 @@ nav:
       - Error Types: advanced/error-types.md
       - Formatting: advanced/formatting.md
       - Context Integration: advanced/context.md
+      - Testing: advanced/testing.md
   - Examples:
       - Basic Examples: examples/basic.md
       - Advanced Examples: examples/advanced.md
