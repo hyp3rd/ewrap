@@ -1,17 +1,20 @@
 # ewrap
 
-A sophisticated, configurable error wrapper for Go applications that provides:
+A sophisticated, configurable error wrapper for Go applications that provides comprehensive error handling capabilities with a focus on performance and flexibility.
 
-- **Stack Traces**: Automatically captures stack traces when errors are created
-- **Error Wrapping**: Maintains error chains while adding context
-- **Metadata**: Attach arbitrary key-value pairs to errors
-- **Logging Integration**: Flexible logger interface for custom logging implementations
-- **Go 1.13+ Compatible**: Works with `errors.Is`, `errors.As`, and error chains
-- **Clean Stack Traces**: Filters out runtime frames for cleaner output
-- **Thread-Safe**: Safe for concurrent use
-- **Context Preservation**: Maintains error context through the chain
+## Core Features
 
-Common logging frameworks like logrus, zap, or zerolog can be easily adapted to this interface.
+- **Stack Traces**: Automatically captures and filters stack traces for meaningful error debugging
+- **Error Wrapping**: Maintains error chains while preserving context through the entire chain
+- **Metadata Attachment**: Attach and manage arbitrary key-value pairs to errors
+- **Logging Integration**: Flexible logger interface supporting major logging frameworks (logrus, zap, zerolog)
+- **Error Categorization**: Built-in error types and severity levels for better error handling
+- **Circuit Breaker Pattern**: Protect your systems from cascading failures
+- **Efficient Error Grouping**: Pool-based error group management for high-performance scenarios
+- **Context Preservation**: Rich error context including request IDs, user information, and operation details
+- **Thread-Safe Operations**: Safe for concurrent use in all operations
+- **Format Options**: JSON and YAML output support with customizable formatting
+- **Go 1.13+ Compatible**: Full support for `errors.Is`, `errors.As`, and error chains
 
 ## Installation
 
@@ -19,70 +22,89 @@ Common logging frameworks like logrus, zap, or zerolog can be easily adapted to 
 go get github.com/hyp3rd/errors-wrapper
 ```
 
-## Usage
+## Usage Examples
 
-Basic error creation:
+### Basic Error Handling
 
-```go
-err := ewrap.New("something went wrong")
-```
-
-With logger:
+Create and wrap errors with context:
 
 ```go
-logger := myapp.NewLogger() // implements ewrap.Logger
-err := ewrap.New("something went wrong", ewrap.WithLogger(logger))
-```
+// Create a new error
+err := ewrap.New("database connection failed")
 
-Wrapping an error with context:
-
-```go
+// Wrap an existing error with context
 if err != nil {
     return ewrap.Wrap(err, "failed to process request")
 }
 ```
 
-Adding metadata:
+### Advanced Error Context
+
+Add rich context and metadata to errors:
 
 ```go
-err := ewrap.New("database error", ewrap.WithLogger(logger)).
+err := ewrap.New("operation failed",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
+    ewrap.WithLogger(logger)).
     WithMetadata("query", "SELECT * FROM users").
     WithMetadata("retry_count", 3)
 
-// Log the error with all metadata
+// Log the error with all context
 err.Log()
 ```
 
-### Example
+### Error Groups with Pooling
+
+Use error groups efficiently in high-throughput scenarios:
 
 ```go
-func ProcessOrder(ctx context.Context, orderID string) error {
-    if err := validateOrder(orderID); err != nil {
-        return ewrap.Wrap(err, "invalid order",
-            ewrap.WithContext(ctx),
-            ewrap.WithErrorType(ewrap.ErrorTypeValidation),
-            ewrap.WithLogger(logger))
-    }
+// Create an error group pool with initial capacity
+pool := ewrap.NewErrorGroupPool(4)
 
-    err := saveToDatabase(orderID)
-    if err != nil {
-        return ewrap.Wrap(err, "failed to save order",
-            ewrap.WithContext(ctx),
-            ewrap.WithErrorType(ewrap.ErrorTypeDatabase),
-            ewrap.WithRetry(3, time.Second*5),
-            ewrap.WithLogger(logger))
-    }
+// Get an error group from the pool
+eg := pool.Get()
+defer eg.Release()  // Return to pool when done
 
-    return nil
+// Add errors as needed
+eg.Add(err1)
+eg.Add(err2)
+
+if eg.HasErrors() {
+    return eg.Error()
 }
+```
 
-// with circuit breaker and error grouping
+### Circuit Breaker Pattern
+
+Protect your system from cascading failures:
+
+```go
+// Create a circuit breaker for database operations
+cb := ewrap.NewCircuitBreaker("database", 3, time.Minute)
+
+if cb.CanExecute() {
+    if err := performDatabaseOperation(); err != nil {
+        cb.RecordFailure()
+        return ewrap.Wrap(err, "database operation failed",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
+    }
+    cb.RecordSuccess()
+}
+```
+
+### Complete Example
+
+Here's a comprehensive example combining multiple features:
+
+```go
 func processOrder(ctx context.Context, orderID string) error {
+    // Get an error group from the pool
+    pool := ewrap.NewErrorGroupPool(4)
+    eg := pool.Get()
+    defer eg.Release()
+
     // Create a circuit breaker for database operations
     cb := ewrap.NewCircuitBreaker("database", 3, time.Minute)
-
-    // Create an error group for collecting validation errors
-    eg := ewrap.NewErrorGroup()
 
     // Validate order
     if err := validateOrderID(orderID); err != nil {
@@ -93,11 +115,9 @@ func processOrder(ctx context.Context, orderID string) error {
     if !eg.HasErrors() && cb.CanExecute() {
         if err := saveToDatabase(orderID); err != nil {
             cb.RecordFailure()
-
             return ewrap.Wrap(err, "database operation failed",
                 ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
         }
-
         cb.RecordSuccess()
     }
 
@@ -105,9 +125,31 @@ func processOrder(ctx context.Context, orderID string) error {
 }
 ```
 
-## Logger Interface
+## Error Types and Severity
 
-Implement the `Logger` interface to integrate with your logging system:
+The package provides pre-defined error types and severity levels:
+
+```go
+// Error Types
+ErrorTypeValidation    // Input validation failures
+ErrorTypeNotFound      // Resource not found
+ErrorTypePermission    // Authorization/authentication failures
+ErrorTypeDatabase      // Database operation failures
+ErrorTypeNetwork       // Network-related failures
+ErrorTypeConfiguration // Configuration issues
+ErrorTypeInternal      // Internal system errors
+ErrorTypeExternal      // External service errors
+
+// Severity Levels
+SeverityInfo      // Informational messages
+SeverityWarning   // Warning conditions
+SeverityError     // Error conditions
+SeverityCritical  // Critical failures
+```
+
+## Logging Integration
+
+Implement the Logger interface to integrate with your logging system:
 
 ```go
 type Logger interface {
@@ -117,12 +159,56 @@ type Logger interface {
 }
 ```
 
+Built-in adapters are provided for popular logging frameworks:
+
+```go
+// Zap logger
+zapLogger, _ := zap.NewProduction()
+err := ewrap.New("error occurred",
+    ewrap.WithLogger(adapters.NewZapAdapter(zapLogger)))
+
+// Logrus logger
+logrusLogger := logrus.New()
+err := ewrap.New("error occurred",
+    ewrap.WithLogger(adapters.NewLogrusAdapter(logrusLogger)))
+
+// Zerolog logger
+zerologLogger := zerolog.New(os.Stdout)
+err := ewrap.New("error occurred",
+    ewrap.WithLogger(adapters.NewZerologAdapter(zerologLogger)))
+```
+
+## Error Formatting
+
+Convert errors to structured formats:
+
+```go
+// Convert to JSON
+jsonStr, _ := err.ToJSON(
+    ewrap.WithTimestampFormat(time.RFC3339),
+    ewrap.WithStackTrace(true))
+
+// Convert to YAML
+yamlStr, _ := err.ToYAML(
+    ewrap.WithStackTrace(true))
+```
+
+## Performance Considerations
+
+The package is designed with performance in mind:
+
+- Error groups use sync.Pool for efficient memory usage
+- Minimal allocations in hot paths
+- Thread-safe operations with low contention
+- Pre-allocated buffers for string operations
+- Efficient stack trace capture and filtering
+
 ## Development Setup
 
 1. Clone this repository:
 
    ```bash
-   git clone [<https://github.com/hyp3rd/ewrap.git> your-new-project](https://github.com/hyp3rd/ewrap.git)
+   git clone https://github.com/hyp3rd/ewrap.git
    ```
 
 2. Install VS Code Extensions Recommended (optional):
