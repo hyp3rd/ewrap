@@ -24,6 +24,10 @@ A sophisticated, configurable error wrapper for Go applications that provides co
 go get github.com/hyp3rd/ewrap
 ```
 
+## Documentation
+
+`ewrap` has plenty of features with an exhaustive documentation, browse it [here](https://hyp3rd.github.io/ewrap/).
+
 ## Usage Examples
 
 ### Basic Error Handling
