@@ -42,6 +42,8 @@ err := ewrap.New("database connection failed")
 if err != nil {
     return ewrap.Wrap(err, "failed to process request")
 }
+
+err = ewrap.Newf("failed to process request id: %v", requestID)
 ```
 
 ### Advanced Error Context
