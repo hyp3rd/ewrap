@@ -124,9 +124,9 @@ func NewErrorFormatter() *ErrorFormatter {
     }
 }
 
-func (f *ErrorFormatter) Format(err *ewrap.Error) map[string]interface{} {
+func (f *ErrorFormatter) Format(err *ewrap.Error) map[string]any {
     // Create base error information
-    formatted := map[string]interface{}{
+    formatted := map[string]any{
         "message":   err.Error(),
         "timestamp": time.Now().Format(f.TimestampFormat),
     }
@@ -138,7 +138,7 @@ func (f *ErrorFormatter) Format(err *ewrap.Error) map[string]interface{} {
 
     // Add metadata if enabled
     if f.IncludeMetadata {
-        metadata := make(map[string]interface{})
+        metadata := make(map[string]any)
         // Extract and format metadata...
         formatted["metadata"] = metadata
     }
@@ -206,7 +206,7 @@ func (f *UserErrorFormatter) FormatForUser(err error) string {
 Be careful about what information you expose in different contexts:
 
 ```go
-func formatErrorResponse(err error, internal bool) interface{} {
+func formatErrorResponse(err error, internal bool) any {
     wrappedErr, ok := err.(*ewrap.Error)
     if !ok {
         return map[string]string{"message": "Internal Server Error"}
@@ -214,7 +214,7 @@ func formatErrorResponse(err error, internal bool) interface{} {
 
     if internal {
         // Full details for internal logging
-        return map[string]interface{}{
+        return map[string]any{
             "message":   wrappedErr.Error(),
             "stack":     wrappedErr.Stack(),
             "metadata":  wrappedErr.GetAllMetadata(),
@@ -239,7 +239,7 @@ Maintain consistent error format structures across your application:
 type StandardErrorResponse struct {
     Message   string                 `json:"message"`
     Code      string                 `json:"code"`
-    Details   map[string]interface{} `json:"details,omitempty"`
+    Details   map[string]any `json:"details,omitempty"`
     RequestID string                 `json:"request_id,omitempty"`
     Timestamp string                 `json:"timestamp"`
 }
@@ -260,7 +260,7 @@ func NewStandardErrorResponse(err error, requestID string) StandardErrorResponse
 Adjust formatting based on the execution context:
 
 ```go
-func formatErrorByEnvironment(err error, env string) interface{} {
+func formatErrorByEnvironment(err error, env string) any {
     switch env {
     case "development":
         // Include everything in development

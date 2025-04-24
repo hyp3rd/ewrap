@@ -32,6 +32,12 @@ err := ewrap.New("failed to process payment",
     ewrap.WithRetry(3, time.Second*5))
 ```
 
+The `Newf` function is similar to `New`, but it allows you to provide a formatted error message:
+
+```go
+err := ewrap.Newf("failed to process payment: %w", err)
+```
+
 Each option serves a specific purpose:
 
 - `WithContext`: Adds request context and error classification

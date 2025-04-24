@@ -12,9 +12,9 @@ Let's start by understanding the core logging interface:
 
 ```go
 type Logger interface {
-    Error(msg string, keysAndValues ...interface{})
-    Debug(msg string, keysAndValues ...interface{})
-    Info(msg string, keysAndValues ...interface{})
+    Error(msg string, keysAndValues ...any)
+    Debug(msg string, keysAndValues ...any)
+    Info(msg string, keysAndValues ...any)
 }
 ```
 
@@ -114,7 +114,7 @@ func processOrder(ctx context.Context, order Order) error {
         Logger:    logger,
         Operation: "process_order",
         StartTime: time.Now(),
-        Context:   map[string]interface{}{
+        Context:   map[string]any{
             "order_id": order.ID,
             "user_id":  order.UserID,
         },
@@ -164,9 +164,9 @@ func NewCustomLogger(baseLogger Logger, component string) *CustomLogger {
     }
 }
 
-func (l *CustomLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *CustomLogger) Error(msg string, keysAndValues ...any) {
     // Add standard context to all error logs
-    enrichedKV := append([]interface{}{
+    enrichedKV := append([]any{
         "component", l.component,
         "environment", l.env,
         "timestamp", time.Now().UTC(),
@@ -175,8 +175,8 @@ func (l *CustomLogger) Error(msg string, keysAndValues ...interface{}) {
     l.logger.Error(msg, enrichedKV...)
 }
 
-func (l *CustomLogger) Debug(msg string, keysAndValues ...interface{}) {
-    enrichedKV := append([]interface{}{
+func (l *CustomLogger) Debug(msg string, keysAndValues ...any) {
+    enrichedKV := append([]any{
         "component", l.component,
         "environment", l.env,
     }, keysAndValues...)
@@ -184,8 +184,8 @@ func (l *CustomLogger) Debug(msg string, keysAndValues ...interface{}) {
     l.logger.Debug(msg, enrichedKV...)
 }
 
-func (l *CustomLogger) Info(msg string, keysAndValues ...interface{}) {
-    enrichedKV := append([]interface{}{
+func (l *CustomLogger) Info(msg string, keysAndValues ...any) {
+    enrichedKV := append([]any{
         "component", l.component,
         "environment", l.env,
     }, keysAndValues...)

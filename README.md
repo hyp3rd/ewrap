@@ -159,9 +159,9 @@ Implement the Logger interface to integrate with your logging system:
 
 ```go
 type Logger interface {
-    Error(msg string, keysAndValues ...interface{})
-    Debug(msg string, keysAndValues ...interface{})
-    Info(msg string, keysAndValues ...interface{})
+    Error(msg string, keysAndValues ...any)
+    Debug(msg string, keysAndValues ...any)
+    Info(msg string, keysAndValues ...any)
 }
 ```
 

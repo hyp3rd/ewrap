@@ -147,7 +147,7 @@ type CacheService struct {
     localCache       *cache.Cache
 }
 
-func (cs *CacheService) GetValue(key string) (interface{}, error) {
+func (cs *CacheService) GetValue(key string) (any, error) {
     // Try primary cache
     if cs.primaryBreaker.CanExecute() {
         value, err := cs.getPrimaryCache(key)

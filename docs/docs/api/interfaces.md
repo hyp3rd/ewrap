@@ -10,9 +10,9 @@ The Logger interface is fundamental to ewrap's logging capabilities. It provides
 
 ```go
 type Logger interface {
-    Error(msg string, keysAndValues ...interface{})
-    Debug(msg string, keysAndValues ...interface{})
-    Info(msg string, keysAndValues ...interface{})
+    Error(msg string, keysAndValues ...any)
+    Debug(msg string, keysAndValues ...any)
+    Info(msg string, keysAndValues ...any)
 }
 ```
 
@@ -24,20 +24,20 @@ type StandardLogger struct {
     logger *log.Logger
 }
 
-func (l *StandardLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *StandardLogger) Error(msg string, keysAndValues ...any) {
     l.logger.Printf("ERROR: %s %v", msg, formatKeyValues(keysAndValues...))
 }
 
-func (l *StandardLogger) Debug(msg string, keysAndValues ...interface{}) {
+func (l *StandardLogger) Debug(msg string, keysAndValues ...any) {
     l.logger.Printf("DEBUG: %s %v", msg, formatKeyValues(keysAndValues...))
 }
 
-func (l *StandardLogger) Info(msg string, keysAndValues ...interface{}) {
+func (l *StandardLogger) Info(msg string, keysAndValues ...any) {
     l.logger.Printf("INFO: %s %v", msg, formatKeyValues(keysAndValues...))
 }
 
 // Helper function to format key-value pairs
-func formatKeyValues(keysAndValues ...interface{}) string {
+func formatKeyValues(keysAndValues ...any) string {
     var pairs []string
     for i := 0; i < len(keysAndValues); i += 2 {
         if i+1 < len(keysAndValues) {
@@ -74,10 +74,10 @@ type Error struct {
     Stack() string
 
     // GetMetadata retrieves metadata associated with the error
-    GetMetadata(key string) (interface{}, bool)
+    GetMetadata(key string) (any, bool)
 
     // WithMetadata adds metadata to the error
-    WithMetadata(key string, value interface{}) *Error
+    WithMetadata(key string, value any) *Error
 
     // Is reports whether target matches err in the error chain
     Is(target error) bool
@@ -121,7 +121,7 @@ type ProductionLogger struct {
     output io.Writer
 }
 
-func (l *ProductionLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *ProductionLogger) Error(msg string, keysAndValues ...any) {
     entry := LogEntry{
         Level:     "ERROR",
         Message:   msg,
@@ -137,7 +137,7 @@ type TestLogger struct {
     mu   sync.Mutex
 }
 
-func (l *TestLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *TestLogger) Error(msg string, keysAndValues ...any) {
     l.mu.Lock()
     defer l.mu.Unlock()
 
@@ -161,7 +161,7 @@ type MetricsLogger struct {
     metrics MetricsCollector
 }
 
-func (l *MetricsLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *MetricsLogger) Error(msg string, keysAndValues ...any) {
     // Log the error
     l.logger.Error(msg, keysAndValues...)
 
@@ -186,13 +186,13 @@ type StructuredLogger struct {
     mu        sync.Mutex
 }
 
-func (l *StructuredLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *StructuredLogger) Error(msg string, keysAndValues ...any) {
     if l.minLevel <= ErrorLevel {
         l.log(ErrorLevel, msg, keysAndValues...)
     }
 }
 
-func (l *StructuredLogger) log(level LogLevel, msg string, keysAndValues ...interface{}) {
+func (l *StructuredLogger) log(level LogLevel, msg string, keysAndValues ...any) {
     l.mu.Lock()
     defer l.mu.Unlock()
 
@@ -243,14 +243,14 @@ Creating specialized interfaces for specific use cases:
 type ContextualLogger interface {
     Logger
     WithContext(ctx context.Context) Logger
-    WithFields(fields map[string]interface{}) Logger
+    WithFields(fields map[string]any) Logger
 }
 
 // Implementation example
 type contextualLogger struct {
     Logger
     ctx    context.Context
-    fields map[string]interface{}
+    fields map[string]any
 }
 
 func (l *contextualLogger) WithContext(ctx context.Context) Logger {
@@ -261,7 +261,7 @@ func (l *contextualLogger) WithContext(ctx context.Context) Logger {
     }
 }
 
-func (l *contextualLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *contextualLogger) Error(msg string, keysAndValues ...any) {
     // Combine context values, fields, and provided key-values
     allKeyValues := l.mergeContextAndFields(keysAndValues...)
     l.Logger.Error(msg, allKeyValues...)

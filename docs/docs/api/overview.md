@@ -24,7 +24,7 @@ type Error struct {
     msg      string
     cause    error
     stack    []uintptr
-    metadata map[string]interface{}
+    metadata map[string]any
     logger   Logger
     mu       sync.RWMutex
 }
@@ -42,7 +42,7 @@ type ErrorContext struct {
     Version     string
     File        string
     Line        int
-    Data        map[string]interface{}
+    Data        map[string]any
 }
 ```
 
@@ -82,9 +82,9 @@ The logging system is designed for flexibility and integration with existing log
 ```go
 // Logger interface
 type Logger interface {
-    Error(msg string, keysAndValues ...interface{})
-    Debug(msg string, keysAndValues ...interface{})
-    Info(msg string, keysAndValues ...interface{})
+    Error(msg string, keysAndValues ...any)
+    Debug(msg string, keysAndValues ...any)
+    Info(msg string, keysAndValues ...any)
 }
 ```
 

@@ -18,7 +18,7 @@ func TestErrorCreation(t *testing.T) {
         message        string
         errorType     ErrorType
         severity      Severity
-        metadata      map[string]interface{}
+        metadata      map[string]any
         expectedStack bool
     }{
         {
@@ -34,7 +34,7 @@ func TestErrorCreation(t *testing.T) {
             message:    "connection failed",
             errorType:  ErrorTypeDatabase,
             severity:   SeverityCritical,
-            metadata: map[string]interface{}{
+            metadata: map[string]any{
                 "host": "localhost",
                 "port": 5432,
             },
@@ -300,7 +300,7 @@ func TestErrorIntegration(t *testing.T) {
             t.Errorf("Expected status 500, got %d", resp.StatusCode)
         }
 
-        var errorResp map[string]interface{}
+        var errorResp map[string]any
         if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
             t.Fatal(err)
         }

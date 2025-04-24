@@ -22,7 +22,7 @@ type Error struct {
 	msg      string
 	cause    error
 	stack    []uintptr
-	metadata map[string]interface{}
+	metadata map[string]any
 	logger   logger.Logger
 	mu       sync.RWMutex // Protects metadata and logger
 }
@@ -52,7 +52,7 @@ func New(msg string, opts ...Option) *Error {
 	err := &Error{
 		msg:      msg,
 		stack:    CaptureStack(),
-		metadata: make(map[string]interface{}),
+		metadata: make(map[string]any),
 	}
 
 	for _, opt := range opts {
@@ -60,6 +60,11 @@ func New(msg string, opts ...Option) *Error {
 	}
 
 	return err
+}
+
+// Newf creates a new Error with a formatted message and applies the provided options.
+func Newf(format string, args ...any) *Error {
+	return New(fmt.Sprintf(format, args...))
 }
 
 // Wrap wraps an existing error with additional context and stack trace.
@@ -70,7 +75,7 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 
 	var (
 		stack      []uintptr
-		metadata   map[string]interface{}
+		metadata   map[string]any
 		wrappedErr *Error
 	)
 	// If the error is already wrapped, preserve its stack trace and metadata
@@ -79,7 +84,7 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 
 		stack = wrappedErr.stack
 		// Create a new metadata map with the existing values
-		metadata = make(map[string]interface{}, len(wrappedErr.metadata))
+		metadata = make(map[string]any, len(wrappedErr.metadata))
 
 		for k, v := range wrappedErr.metadata {
 			metadata[k] = v
@@ -88,7 +93,7 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 		wrappedErr.mu.RUnlock()
 	} else {
 		stack = CaptureStack()
-		metadata = make(map[string]interface{})
+		metadata = make(map[string]any)
 	}
 
 	wrapped := &Error{
@@ -106,7 +111,7 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 }
 
 // Wrapf wraps an error with a formatted message.
-func Wrapf(err error, format string, args ...interface{}) *Error {
+func Wrapf(err error, format string, args ...any) *Error {
 	if err == nil {
 		return nil
 	}
@@ -129,7 +134,7 @@ func (e *Error) Cause() error {
 }
 
 // WithMetadata adds metadata to the error.
-func (e *Error) WithMetadata(key string, value interface{}) *Error {
+func (e *Error) WithMetadata(key string, value any) *Error {
 	e.mu.Lock()
 	e.metadata[key] = value
 
@@ -147,7 +152,7 @@ func (e *Error) WithMetadata(key string, value interface{}) *Error {
 }
 
 // GetMetadata retrieves metadata from the error.
-func (e *Error) GetMetadata(key string) (interface{}, bool) {
+func (e *Error) GetMetadata(key string) (any, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -188,7 +193,7 @@ func (e *Error) Log() {
 	}
 
 	// Create a metadata map for logging
-	logData := make([]interface{}, 0, len(e.metadata)*2+baseLogDataSize)
+	logData := make([]any, 0, len(e.metadata)*2+baseLogDataSize)
 	logData = append(logData, "error", e.msg)
 
 	if e.cause != nil {

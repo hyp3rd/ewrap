@@ -7,8 +7,9 @@ import (
 	"emperror.dev/emperror"
 	"emperror.dev/errors"
 	"github.com/hashicorp/go-multierror"
-	"github.com/hyp3rd/ewrap/pkg/ewrap"
 	"go.uber.org/multierr"
+
+	"github.com/hyp3rd/ewrap/pkg/ewrap"
 )
 
 // This test suite compares our implementation against popular error handling libraries
@@ -19,14 +20,14 @@ func BenchmarkErrorCreation(b *testing.B) {
 
 	b.Run("ewrap/New", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = ewrap.New(msg)
 		}
 	})
 
 	b.Run("pkg/errors/New", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = errors.New(msg)
 		}
 	})
@@ -49,21 +50,21 @@ func BenchmarkErrorWrapping(b *testing.B) {
 
 	b.Run("ewrap/Wrap", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = ewrap.Wrap(baseErr, wrapMsg)
 		}
 	})
 
 	b.Run("pkg/errors/Wrap", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = errors.Wrap(baseErr, wrapMsg)
 		}
 	})
 
 	b.Run("emperror/Wrap", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = emperror.Wrap(baseErr, wrapMsg)
 		}
 	})

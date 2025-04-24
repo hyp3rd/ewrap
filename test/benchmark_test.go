@@ -13,9 +13,9 @@ import (
 // mockLogger implements a minimal logger for benchmarking
 type mockLogger struct{}
 
-func (m *mockLogger) Error(msg string, keysAndValues ...interface{}) {}
-func (m *mockLogger) Debug(msg string, keysAndValues ...interface{}) {}
-func (m *mockLogger) Info(msg string, keysAndValues ...interface{})  {}
+func (m *mockLogger) Error(msg string, keysAndValues ...any) {}
+func (m *mockLogger) Debug(msg string, keysAndValues ...any) {}
+func (m *mockLogger) Info(msg string, keysAndValues ...any)  {}
 
 // BenchmarkNew measures the performance of creating new errors
 func BenchmarkNew(b *testing.B) {
@@ -25,7 +25,7 @@ func BenchmarkNew(b *testing.B) {
 	b.Run("Simple", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = ewrap.New("simple error")
 		}
 	})
@@ -33,7 +33,7 @@ func BenchmarkNew(b *testing.B) {
 	b.Run("WithContext", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = ewrap.New("error with context",
 				ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
 		}
@@ -51,7 +51,7 @@ func BenchmarkNew(b *testing.B) {
 	b.Run("FullFeatures", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = ewrap.New("full featured error",
 				ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError),
 				ewrap.WithLogger(logger)).
@@ -142,7 +142,7 @@ func BenchmarkFormatting(b *testing.B) {
 	b.Run("ToJSON", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _ = err.ToJSON()
 		}
 	})
@@ -160,7 +160,7 @@ func BenchmarkFormatting(b *testing.B) {
 	b.Run("ToYAML", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _ = err.ToYAML()
 		}
 	})
@@ -230,7 +230,7 @@ func BenchmarkStackTrace(b *testing.B) {
 	b.Run("CaptureStack", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = ewrap.CaptureStack()
 		}
 	})
@@ -238,7 +238,7 @@ func BenchmarkStackTrace(b *testing.B) {
 	b.Run("FormatStack", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = err.Stack()
 		}
 	})

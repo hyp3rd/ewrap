@@ -45,6 +45,8 @@ func (et ErrorType) String() string {
 		return "internal"
 	case ErrorTypeExternal:
 		return "external"
+	case ErrorTypeUnknown:
+		fallthrough
 	default:
 		return "unknown"
 	}

@@ -10,20 +10,20 @@ type MockLogger struct {
 	mock.Mock
 }
 
-func (m *MockLogger) Error(msg string, keysAndValues ...interface{}) {
-	args := []interface{}{msg}
+func (m *MockLogger) Error(msg string, keysAndValues ...any) {
+	args := []any{msg}
 	args = append(args, keysAndValues...)
 	m.Called(args...)
 }
 
-func (m *MockLogger) Debug(msg string, keysAndValues ...interface{}) {
-	args := []interface{}{msg}
+func (m *MockLogger) Debug(msg string, keysAndValues ...any) {
+	args := []any{msg}
 	args = append(args, keysAndValues...)
 	m.Called(args...)
 }
 
-func (m *MockLogger) Info(msg string, keysAndValues ...interface{}) {
-	args := []interface{}{msg}
+func (m *MockLogger) Info(msg string, keysAndValues ...any) {
+	args := []any{msg}
 	args = append(args, keysAndValues...)
 	m.Called(args...)
 }

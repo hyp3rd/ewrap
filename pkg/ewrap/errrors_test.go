@@ -109,7 +109,7 @@ type testLogger struct {
 type logEntry struct {
 	level   string
 	msg     string
-	keyVals []interface{}
+	keyVals []any
 }
 
 func newTestLogger() *testLogger {
@@ -118,19 +118,19 @@ func newTestLogger() *testLogger {
 	}
 }
 
-func (l *testLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *testLogger) Error(msg string, keysAndValues ...any) {
 	l.log("error", msg, keysAndValues...)
 }
 
-func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {
+func (l *testLogger) Debug(msg string, keysAndValues ...any) {
 	l.log("debug", msg, keysAndValues...)
 }
 
-func (l *testLogger) Info(msg string, keysAndValues ...interface{}) {
+func (l *testLogger) Info(msg string, keysAndValues ...any) {
 	l.log("info", msg, keysAndValues...)
 }
 
-func (l *testLogger) log(level, msg string, keysAndValues ...interface{}) {
+func (l *testLogger) log(level, msg string, keysAndValues ...any) {
 	l.mu.Lock()
 	l.logs = append(l.logs, logEntry{
 		level:   level,

@@ -28,7 +28,7 @@ func NewErrorGroupPool(initialCapacity int) *ErrorGroupPool {
 
 	return &ErrorGroupPool{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return &ErrorGroup{
 					errors: make([]error, 0, initialCapacity),
 					pool:   nil, // Will be set when retrieved from pool

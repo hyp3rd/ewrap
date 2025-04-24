@@ -101,7 +101,7 @@ func main() {
 For cases where you need to include formatted messages, use `Wrapf`:
 
 ```go
-func updateUser(userID string, fields map[string]interface{}) error {
+func updateUser(userID string, fields map[string]any) error {
     if err := db.Update(userID, fields); err != nil {
         return ewrap.Wrapf(err, "failed to update user %s", userID)
     }

@@ -56,12 +56,12 @@ While metadata values can be of any type, it's often helpful to use structured d
 ```go
 type QueryMetadata struct {
     SQL        string
-    Parameters []interface{}
+    Parameters []any
     Duration   time.Duration
     Table      string
 }
 
-func executeQuery(query string, params ...interface{}) error {
+func executeQuery(query string, params ...any) error {
     start := time.Now()
 
     result, err := db.Exec(query, params...)
@@ -124,7 +124,7 @@ Metadata is particularly valuable for debugging and monitoring. Here's a pattern
 type OperationTracker struct {
     StartTime   time.Time
     Steps      []string
-    Metrics    map[string]interface{}
+    Metrics    map[string]any
     Attributes map[string]string
 }
 
@@ -132,7 +132,7 @@ func NewOperationTracker() *OperationTracker {
     return &OperationTracker{
         StartTime:   time.Now(),
         Steps:      make([]string, 0),
-        Metrics:    make(map[string]interface{}),
+        Metrics:    make(map[string]any),
         Attributes: make(map[string]string),
     }
 }
@@ -141,7 +141,7 @@ func (ot *OperationTracker) AddStep(step string) {
     ot.Steps = append(ot.Steps, step)
 }
 
-func (ot *OperationTracker) AddMetric(key string, value interface{}) {
+func (ot *OperationTracker) AddMetric(key string, value any) {
     ot.Metrics[key] = value
 }
 

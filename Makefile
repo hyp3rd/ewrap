@@ -1,4 +1,4 @@
-GOLANGCI_LINT_VERSION = v1.61.0
+GOLANGCI_LINT_VERSION = v2.1.2
 
 GOFILES_NOVENDOR = $(shell find . -type f -name '*.go' -not -path "./vendor/*" -not -path "./.git/*")
 
@@ -6,19 +6,22 @@ GOFILES_NOVENDOR = $(shell find . -type f -name '*.go' -not -path "./vendor/*" -
 GITVERSION = $(shell gitversion | jq .SemVer)
 GITVERSION_NOT_INSTALLED = "gitversion is not installed: https://github.com/GitTools/GitVersion"
 
+
 test:
 	go test -v -timeout 5m -cover ./...
 
 benchmark:
 	go test -bench=. -benchmem ./pkg/ewrap
 	go test -bench=Benchmark -benchmem ./test
-	go test -run=TestProfile -cpuprofile=cpu.prof -memprofile=mem.prof ./test
+	# go test -run=TestProfile -cpuprofile=cpu.prof -memprofile=mem.prof ./test
 
 update-deps:
 	go get -v -u ./...
 	go mod tidy
 
 prepare-toolchain:
+	$(call check_command_exists,docker) || (echo "Docker is missing, install it before starting to code." && exit 1)
+
 	$(call check_command_exists,git) || (echo "git is not present on the system, install it before starting to code." && exit 1)
 
 	$(call check_command_exists,go) || (echo "golang is not present on the system, download and install it at https://go.dev/dl" && exit 1)
@@ -37,18 +40,24 @@ prepare-toolchain:
 	@echo "Installing staticcheck...\n"
 	$(call check_command_exists,staticcheck) || go install honnef.co/go/tools/cmd/staticcheck@latest
 
+	@echo "Installing wire...\n"
+	$(call check_command_exists,wire) || go install github.com/google/wire/cmd/wire@latest
+
 	@echo "Checking if pre-commit is installed..."
 	pre-commit --version || (echo "pre-commit is not installed, install it with 'pip install pre-commit'" && exit 1)
 
 	@echo "Initializing pre-commit..."
 	pre-commit validate-config || pre-commit install && pre-commit install-hooks
 
+	@echo "Installing pre-commit hooks..."
+	pre-commit install
+	pre-commit install-hooks
+
 
 lint: prepare-toolchain
-
 	@echo "Running gci..."
 	@for file in ${GOFILES_NOVENDOR}; do \
-		gci write --skip-vendor --skip-generated $$file; \
+		gci write -s standard -s default -s "prefix(github.com/hyp3rd)" -s blank -s dot -s alias -s localmodule --skip-vendor --skip-generated $$file; \
 	done
 
 	@echo "\nRunning gofumpt..."
@@ -58,7 +67,7 @@ lint: prepare-toolchain
 	staticcheck ./...
 
 	@echo "\nRunning golangci-lint $(GOLANGCI_LINT_VERSION)..."
-	golangci-lint run ./...
+	golangci-lint run ./......
 
 # check_command_exists is a helper function that checks if a command exists.
 define check_command_exists

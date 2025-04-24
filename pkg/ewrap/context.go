@@ -36,7 +36,7 @@ type ErrorContext struct {
 	File string
 	Line int
 	// Additional context-specific data.
-	Data map[string]interface{}
+	Data map[string]any
 }
 
 // newErrorContext creates a new ErrorContext with basic information.
@@ -49,7 +49,7 @@ func newErrorContext(ctx context.Context, errorType ErrorType, severity Severity
 		Severity:    severity,
 		File:        file,
 		Line:        line,
-		Data:        make(map[string]interface{}),
+		Data:        make(map[string]any),
 		Environment: getEnvironment(),
 	}
 

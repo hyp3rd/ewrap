@@ -19,17 +19,20 @@ func NewZapAdapter(logger *zap.Logger) *ZapAdapter {
 	return &ZapAdapter{logger: logger}
 }
 
-func (z *ZapAdapter) Error(msg string, keysAndValues ...interface{}) {
+// Error logs an error message with optional key-value pairs.
+func (z *ZapAdapter) Error(msg string, keysAndValues ...any) {
 	fields := convertToZapFields(keysAndValues...)
 	z.logger.Error(msg, fields...)
 }
 
-func (z *ZapAdapter) Debug(msg string, keysAndValues ...interface{}) {
+// Debug logs a debug message with optional key-value pairs.
+func (z *ZapAdapter) Debug(msg string, keysAndValues ...any) {
 	fields := convertToZapFields(keysAndValues...)
 	z.logger.Debug(msg, fields...)
 }
 
-func (z *ZapAdapter) Info(msg string, keysAndValues ...interface{}) {
+// Info logs an info message with optional key-value pairs.
+func (z *ZapAdapter) Info(msg string, keysAndValues ...any) {
 	fields := convertToZapFields(keysAndValues...)
 	z.logger.Info(msg, fields...)
 }
@@ -44,17 +47,20 @@ func NewLogrusAdapter(logger *logrus.Logger) *LogrusAdapter {
 	return &LogrusAdapter{logger: logger}
 }
 
-func (l *LogrusAdapter) Error(msg string, keysAndValues ...interface{}) {
+// Error logs an error message with optional key-value pairs.
+func (l *LogrusAdapter) Error(msg string, keysAndValues ...any) {
 	fields := convertToLogrusFields(keysAndValues...)
 	l.logger.WithFields(fields).Error(msg)
 }
 
-func (l *LogrusAdapter) Debug(msg string, keysAndValues ...interface{}) {
+// Debug logs a debug message with optional key-value pairs.
+func (l *LogrusAdapter) Debug(msg string, keysAndValues ...any) {
 	fields := convertToLogrusFields(keysAndValues...)
 	l.logger.WithFields(fields).Debug(msg)
 }
 
-func (l *LogrusAdapter) Info(msg string, keysAndValues ...interface{}) {
+// Info logs an info message with optional key-value pairs.
+func (l *LogrusAdapter) Info(msg string, keysAndValues ...any) {
 	fields := convertToLogrusFields(keysAndValues...)
 	l.logger.WithFields(fields).Info(msg)
 }
@@ -69,26 +75,29 @@ func NewZerologAdapter(logger zerolog.Logger) *ZerologAdapter {
 	return &ZerologAdapter{logger: logger}
 }
 
-func (z *ZerologAdapter) Error(msg string, keysAndValues ...interface{}) {
+// Error logs an error message with optional key-value pairs.
+func (z *ZerologAdapter) Error(msg string, keysAndValues ...any) {
 	event := z.logger.Error()
 	addZerologFields(event, keysAndValues...)
 	event.Msg(msg)
 }
 
-func (z *ZerologAdapter) Debug(msg string, keysAndValues ...interface{}) {
+// Debug logs a debug message with optional key-value pairs.
+func (z *ZerologAdapter) Debug(msg string, keysAndValues ...any) {
 	event := z.logger.Debug()
 	addZerologFields(event, keysAndValues...)
 	event.Msg(msg)
 }
 
-func (z *ZerologAdapter) Info(msg string, keysAndValues ...interface{}) {
+// Info logs an info message with optional key-value pairs.
+func (z *ZerologAdapter) Info(msg string, keysAndValues ...any) {
 	event := z.logger.Info()
 	addZerologFields(event, keysAndValues...)
 	event.Msg(msg)
 }
 
 // Helper functions to convert key-value pairs to logger-specific formats.
-func convertToZapFields(keysAndValues ...interface{}) []zap.Field {
+func convertToZapFields(keysAndValues ...any) []zap.Field {
 	fields := make([]zap.Field, 0, len(keysAndValues)/keyValuePairSize)
 
 	for i := 0; i < len(keysAndValues); i += keyValuePairSize {
@@ -105,7 +114,10 @@ func convertToZapFields(keysAndValues ...interface{}) []zap.Field {
 	return fields
 }
 
-func convertToLogrusFields(keysAndValues ...interface{}) logrus.Fields {
+// convertToLogrusFields converts key-value pairs to Logrus fields.
+// It iterates over the provided key-value pairs and adds them to a Logrus fields map.
+// If the number of arguments is odd, the last argument is ignored.
+func convertToLogrusFields(keysAndValues ...any) logrus.Fields {
 	fields := make(logrus.Fields)
 
 	for i := 0; i < len(keysAndValues); i += 2 {
@@ -122,7 +134,10 @@ func convertToLogrusFields(keysAndValues ...interface{}) logrus.Fields {
 	return fields
 }
 
-func addZerologFields(event *zerolog.Event, keysAndValues ...interface{}) {
+// addZerologFields adds key-value pairs to a Zerolog event.
+// It iterates over the provided key-value pairs and adds them to the event.
+// If the number of arguments is odd, the last argument is ignored.
+func addZerologFields(event *zerolog.Event, keysAndValues ...any) {
 	for i := 0; i < len(keysAndValues); i += 2 {
 		if i+1 < len(keysAndValues) {
 			key, ok := keysAndValues[i].(string)

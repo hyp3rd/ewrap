@@ -53,9 +53,9 @@ When dealing with metadata or formatting, pre-allocation can significantly impro
 
 ```go
 // Pre-allocate slices with expected capacity
-func buildErrorContext(err error, expectedFields int) map[string]interface{} {
+func buildErrorContext(err error, expectedFields int) map[string]any {
     // Allocate map with expected size to avoid resizing
-    context := make(map[string]interface{}, expectedFields)
+    context := make(map[string]any, expectedFields)
 
     if wrappedErr, ok := err.(*ewrap.Error); ok {
         // Pre-allocate string builder with reasonable capacity
@@ -213,7 +213,7 @@ When formatting errors:
 ```go
 // Pool of buffers for formatting
 var bufferPool = sync.Pool{
-    New: func() interface{} {
+    New: func() any {
         return new(bytes.Buffer)
     },
 }
@@ -268,7 +268,7 @@ func initializePools(config Config) {
 
     // Size buffer pools based on expected error volume
     bufferPool := sync.Pool{
-        New: func() interface{} {
+        New: func() any {
             return bytes.NewBuffer(make([]byte, 0, config.AverageErrorSize))
         },
     }

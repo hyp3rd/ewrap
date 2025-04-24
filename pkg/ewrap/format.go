@@ -26,9 +26,9 @@ type ErrorOutput struct {
 	// Cause contains the underlying error if any
 	Cause *ErrorOutput `json:"cause,omitempty" yaml:"cause,omitempty"`
 	// Context contains additional error context
-	Context map[string]interface{} `json:"context,omitempty" yaml:"context,omitempty"`
+	Context map[string]any `json:"context,omitempty" yaml:"context,omitempty"`
 	// Metadata contains user-defined metadata
-	Metadata map[string]interface{} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // FormatOption defines formatting options for error output.
@@ -60,12 +60,12 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	// Extract error context if available
 	var (
 		ctx        *ErrorContext
-		contextMap map[string]interface{}
+		contextMap map[string]any
 	)
 
 	if rawCtx, ok := e.metadata["error_context"]; ok {
 		if ctx, ok = rawCtx.(*ErrorContext); ok {
-			contextMap = map[string]interface{}{
+			contextMap = map[string]any{
 				"request_id":  ctx.RequestID,
 				"user":        ctx.User,
 				"component":   ctx.Component,
@@ -85,7 +85,7 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 		Severity:  "error",
 		Stack:     e.Stack(),
 		Context:   contextMap,
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 
 	// Copy metadata excluding internal keys

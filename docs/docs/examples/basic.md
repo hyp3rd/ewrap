@@ -107,15 +107,15 @@ type AppLogger struct {
     logger *zap.Logger
 }
 
-func (l *AppLogger) Error(msg string, keysAndValues ...interface{}) {
+func (l *AppLogger) Error(msg string, keysAndValues ...any) {
     l.logger.Error(msg, convertToZapFields(keysAndValues...)...)
 }
 
-func (l *AppLogger) Debug(msg string, keysAndValues ...interface{}) {
+func (l *AppLogger) Debug(msg string, keysAndValues ...any) {
     l.logger.Debug(msg, convertToZapFields(keysAndValues...)...)
 }
 
-func (l *AppLogger) Info(msg string, keysAndValues ...interface{}) {
+func (l *AppLogger) Info(msg string, keysAndValues ...any) {
     l.logger.Info(msg, convertToZapFields(keysAndValues...)...)
 }
 

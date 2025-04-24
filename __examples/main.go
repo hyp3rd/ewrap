@@ -6,11 +6,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/hyp3rd/ewrap/pkg/ewrap"
-	"github.com/hyp3rd/ewrap/pkg/ewrap/adapters"
 	"github.com/rs/zerolog"
 	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
+
+	"github.com/hyp3rd/ewrap/pkg/ewrap"
+	"github.com/hyp3rd/ewrap/pkg/ewrap/adapters"
 )
 
 func main() {
