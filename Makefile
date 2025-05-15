@@ -1,4 +1,4 @@
-GOLANGCI_LINT_VERSION = v2.1.2
+GOLANGCI_LINT_VERSION = v2.1.6
 
 GOFILES_NOVENDOR = $(shell find . -type f -name '*.go' -not -path "./vendor/*" -not -path "./.git/*")
 
