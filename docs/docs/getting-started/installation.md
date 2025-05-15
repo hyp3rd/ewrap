@@ -22,9 +22,11 @@ if err != nil {
 }
 
 // Create a new error with context
-err := ewrap.Newf("operation failed: %w", err)
+err := ewrap.Newf(
+    "operation failed: %w", err,
     ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
-    ewrap.WithLogger(logger))
+    ewrap.WithLogger(logger),
+)
 
 err.Log()
 ```
