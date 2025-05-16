@@ -20,6 +20,15 @@ err := ewrap.New("database connection failed")
 if err != nil {
     return ewrap.Wrap(err, "failed to process request")
 }
+
+// Create a new error with context
+err := ewrap.Newf(
+    "operation failed: %w", err,
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
+    ewrap.WithLogger(logger),
+)
+
+err.Log()
 ```
 
 ### Advanced Error Context
