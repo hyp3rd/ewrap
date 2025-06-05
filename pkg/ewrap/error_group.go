@@ -131,6 +131,15 @@ func (eg *ErrorGroup) Error() string {
 	}
 }
 
+// ErrorOrNil returns the ErrorGroup itself if it contains errors, or nil if empty.
+func (eg *ErrorGroup) ErrorOrNil() error {
+	if eg.HasErrors() {
+		return eg
+	}
+
+	return nil
+}
+
 // Errors returns a copy of all errors in the group.
 func (eg *ErrorGroup) Errors() []error {
 	eg.mu.RLock()
