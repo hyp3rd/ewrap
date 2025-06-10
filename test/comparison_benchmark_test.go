@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"go.uber.org/multierr"
 
-	"github.com/hyp3rd/ewrap/pkg/ewrap"
+	"github.com/hyp3rd/ewrap"
 )
 
 // This test suite compares our implementation against popular error handling libraries

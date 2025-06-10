@@ -1,6 +1,6 @@
 module github.com/hyp3rd/ewrap
 
-go 1.24.3
+go 1.24.4
 
 require (
 	emperror.dev/emperror v0.33.0
