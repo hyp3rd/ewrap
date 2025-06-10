@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyp3rd/ewrap/pkg/ewrap"
+	"github.com/hyp3rd/ewrap"
 )
 
 // TestProfileErrorOperations runs a comprehensive profiling suite for error operations.

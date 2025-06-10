@@ -13,7 +13,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/hyp3rd/ewrap/pkg/ewrap"
+    "github.com/hyp3rd/ewrap"
 )
 
 func main() {

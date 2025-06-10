@@ -10,8 +10,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
 
-	"github.com/hyp3rd/ewrap/pkg/ewrap"
-	"github.com/hyp3rd/ewrap/pkg/ewrap/adapters"
+	"github.com/hyp3rd/ewrap"
+	"github.com/hyp3rd/ewrap/adapters"
 )
 
 func main() {

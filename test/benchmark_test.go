@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyp3rd/ewrap/pkg/ewrap"
+	"github.com/hyp3rd/ewrap"
 )
 
 // mockLogger implements a minimal logger for benchmarking
