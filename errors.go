@@ -23,6 +23,7 @@ type Error struct {
 	cause    error
 	stack    []uintptr
 	metadata map[string]any
+	context  *ErrorContext // Optional context for the error
 	logger   logger.Logger
 	mu       sync.RWMutex // Protects metadata and logger
 }
@@ -151,6 +152,23 @@ func (e *Error) WithMetadata(key string, value any) *Error {
 	return e
 }
 
+// WithContext adds context information to the error.
+func (e *Error) WithContext(ctx *ErrorContext) *Error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.context = ctx
+
+	if e.logger != nil {
+		e.logger.Debug("context added",
+			"context", ctx,
+			"error", e.msg,
+		)
+	}
+
+	return e
+}
+
 // GetMetadata retrieves metadata from the error.
 func (e *Error) GetMetadata(key string) (any, bool) {
 	e.mu.RLock()
@@ -159,6 +177,14 @@ func (e *Error) GetMetadata(key string) (any, bool) {
 	val, ok := e.metadata[key]
 
 	return val, ok
+}
+
+// GetErrorContext retrieves the context from the error.
+func (e *Error) GetErrorContext() *ErrorContext {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	return e.context
 }
 
 // Stack returns the stack trace as a string.
