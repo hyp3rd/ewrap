@@ -218,6 +218,7 @@ func CaptureStack() []uintptr {
 	const depth = 32
 
 	var pcs [depth]uintptr
+
 	n := runtime.Callers(runtimeCallers, pcs[:])
 
 	return pcs[:n]

@@ -42,7 +42,7 @@ run:
   # Define the Go version limit.
   # Mainly related to generics support since go1.18.
   # Default: use Go version from the go.mod file, fallback on the env var `GOVERSION`, fallback on 1.17
-  go: "1.24.4"
+  go: "1.25.0"
 
 exclusions:
   # Which file paths to exclude: they will be analyzed, but issues from them won't be reported.
@@ -55,12 +55,15 @@ linters:
   # Enable specific linter
   # https://golangci-lint.run/usage/linters/#enabled-by-default
   default: all
+  enable:
+    - wsl_v5
   disable:
     - exhaustruct
     - depguard
     - ireturn
     - lll
     - tagliatelle
+    - wsl
 
   settings:
     cyclop:
@@ -121,7 +124,6 @@ linters:
       # Default: []
       ignore-package-globs:
         - github.com/hyp3rd/*
-        - go.instruqt.com/*
         - github.com/gofiber/fiber/*
 
     varnamelen:
@@ -193,7 +195,7 @@ formatters:
   #   sections:
   #     - standard # Standard section: captures all standard packages.
   #     - default # Default section: contains all imports that could not be matched to another section type.
-  #     - prefix(go.instruqt.com) # Custom section: groups all imports with the specified Prefix.
+  #     - prefix(github.com/hyp3rd/ewrap) # Custom section: groups all imports with the specified Prefix.
   #   # Checks that no inline comments are present.
   #   # Default: false
   #   no-inline-comments: false

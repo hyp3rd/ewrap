@@ -41,16 +41,15 @@ func main() {
 		ewrap.WithStackTrace(true),
 	)
 
-	//nolint:forbidigo
-	fmt.Println("json", jsonOutput)
+	fmt.Fprintln(os.Stdout, "json", jsonOutput)
 
 	// Convert to YAML
 	yamlOutput, _ := err.ToYAML(
 		ewrap.WithTimestampFormat(time.RFC3339),
 		ewrap.WithStackTrace(true),
 	)
-	//nolint:forbidigo
-	fmt.Println("yaml", yamlOutput)
+
+	fmt.Fprintln(os.Stdout, "yaml", yamlOutput)
 
 	// Log the error using different loggers
 	err = ewrap.Wrap(err, "failed to initialize application",

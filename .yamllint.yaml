@@ -11,5 +11,6 @@ rules:
   truthy: disable
 ignore: |
   .golangci.yaml
+  cspell.config.yaml
   .trunk/*
   docs/mkdocs.yml
