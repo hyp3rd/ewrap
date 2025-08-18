@@ -1,4 +1,4 @@
-GOLANGCI_LINT_VERSION = v2.1.6
+GOLANGCI_LINT_VERSION = v2.4.0
 
 GOFILES_NOVENDOR = $(shell find . -type f -name '*.go' -not -path "./vendor/*" -not -path "./.git/*")
 
@@ -39,9 +39,6 @@ prepare-toolchain:
 
 	@echo "Installing staticcheck...\n"
 	$(call check_command_exists,staticcheck) || go install honnef.co/go/tools/cmd/staticcheck@latest
-
-	@echo "Installing wire...\n"
-	$(call check_command_exists,wire) || go install github.com/google/wire/cmd/wire@latest
 
 	@echo "Checking if pre-commit is installed..."
 	pre-commit --version || (echo "pre-commit is not installed, install it with 'pip install pre-commit'" && exit 1)
