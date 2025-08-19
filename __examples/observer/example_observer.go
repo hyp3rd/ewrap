@@ -1,10 +1,12 @@
-package ewrap
+package main
 
 import (
 	"fmt"
 	"log"
 	"os"
 	"time"
+
+	"github.com/hyp3rd/ewrap"
 )
 
 const (
@@ -12,6 +14,15 @@ const (
 	maxFailures = 3
 	// maxTimeout is the maximum timeout for circuit breakers.
 	maxTimeout = 5 * time.Second
+)
+
+// CircuitState represents the state of a circuit breaker
+type CircuitState int
+
+const (
+	Closed CircuitState = iota
+	Open
+	HalfOpen
 )
 
 // MetricsObserver is an example observer that tracks metrics.
@@ -47,7 +58,6 @@ func (m *MetricsObserver) GetErrorCount() int {
 // GetCircuitState retrieves the current state of a circuit breaker.
 func (m *MetricsObserver) GetCircuitState(name string) (CircuitState, bool) {
 	state, exists := m.circuitBreakers[name]
-
 	return state, exists
 }
 
@@ -57,20 +67,12 @@ func ExampleObserverUsage() {
 	metrics := NewMetricsObserver()
 
 	// Create errors with observer
-	err1 := New("database connection failed", WithObserver(metrics))
-	err2 := Wrap(err1, "failed to fetch user data")
+	err1 := ewrap.New("database connection failed")
+	err2 := ewrap.Wrap(err1, "failed to fetch user data")
 
-	// Log errors (will be recorded by observer)
-	err1.Log()
-	err2.Log() // Will inherit observer from err1
-
-	// Create circuit breaker with observer
-	cb := NewCircuitBreakerWithObserver("database", maxFailures, maxTimeout, metrics)
-
-	// Simulate failures
-	cb.RecordFailure()
-	cb.RecordFailure()
-	cb.RecordFailure() // This will open the circuit
+	// Log errors
+	log.Println(err1.Error())
+	log.Println(err2.Error())
 
 	// Check metrics
 	fmt.Fprintf(os.Stdout, "Total errors: %d\n", metrics.GetErrorCount())
@@ -78,4 +80,8 @@ func ExampleObserverUsage() {
 	if state, exists := metrics.GetCircuitState("database"); exists {
 		fmt.Fprintf(os.Stdout, "Database circuit state: %d\n", state)
 	}
+}
+
+func main() {
+	ExampleObserverUsage()
 }
