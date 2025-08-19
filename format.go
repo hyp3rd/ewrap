@@ -87,7 +87,10 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	}
 
 	if rawRec, ok := e.metadata["recovery_suggestion"]; ok {
-		recovery, _ = rawRec.(*RecoverySuggestion)
+		recovery, ok = rawRec.(*RecoverySuggestion)
+		if !ok {
+			recovery = nil
+		}
 	}
 
 	// Create base output structure
