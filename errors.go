@@ -252,6 +252,8 @@ func (e *Error) Stack() string {
 
 // Log logs the error using the configured logger.
 func (e *Error) Log() {
+	observer.RecordError(e.msg)
+
 	e.mu.RLock()
 	logger := e.logger
 	e.mu.RUnlock()

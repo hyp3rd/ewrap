@@ -106,6 +106,8 @@ func (cb *CircuitBreaker) transitionTo(newState CircuitState) {
 	oldState := cb.state
 	cb.state = newState
 
+	observer.RecordCircuitStateTransition(cb.name, oldState, newState)
+
 	if cb.onStateChange != nil {
 		go cb.onStateChange(cb.name, oldState, newState)
 	}
