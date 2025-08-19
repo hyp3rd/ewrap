@@ -84,10 +84,8 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 		wrappedErr.mu.RLock()
 
 		stack = wrappedErr.stack
-		// Create a new metadata map with the existing values
-		metadata = make(map[string]any, len(wrappedErr.metadata))
-
-		maps.Copy(metadata, wrappedErr.metadata)
+		// Clone metadata map using maps.Clone for simplicity
+		metadata = maps.Clone(wrappedErr.metadata)
 
 		wrappedErr.mu.RUnlock()
 	} else {

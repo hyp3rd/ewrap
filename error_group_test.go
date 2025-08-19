@@ -1,6 +1,7 @@
 package ewrap
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -102,4 +103,26 @@ func BenchmarkErrorGroupPool(b *testing.B) {
 			_ = eg.Error()
 		}
 	})
+}
+
+func TestErrorGroupJoin(t *testing.T) {
+	eg := NewErrorGroup()
+	err1 := fmt.Errorf("first")
+	err2 := fmt.Errorf("second")
+
+	eg.Add(err1)
+	eg.Add(err2)
+
+	joined := eg.Join()
+	if joined == nil {
+		t.Fatal("expected joined error")
+	}
+	if !errors.Is(joined, err1) || !errors.Is(joined, err2) {
+		t.Fatalf("joined error does not contain original errors")
+	}
+
+	eg.Clear()
+	if eg.Join() != nil {
+		t.Fatal("expected nil when joining empty group")
+	}
 }

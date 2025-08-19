@@ -77,8 +77,8 @@ defer eg.Release()  // Return to pool when done
 eg.Add(err1)
 eg.Add(err2)
 
-if eg.HasErrors() {
-    return eg.Error()
+if err := eg.Join(); err != nil {
+    return err
 }
 ```
 
@@ -184,6 +184,11 @@ err := ewrap.New("error occurred",
 zerologLogger := zerolog.New(os.Stdout)
 err := ewrap.New("error occurred",
     ewrap.WithLogger(adapters.NewZerologAdapter(zerologLogger)))
+
+// Slog logger (Go 1.21+)
+slogLogger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+err := ewrap.New("error occurred",
+    ewrap.WithLogger(adapters.NewSlogAdapter(slogLogger)))
 ```
 
 ## Error Formatting
