@@ -1,29 +1,31 @@
 # Error Formatting
 
-Error formatting in ewrap provides flexible ways to present errors in different formats and contexts. This capability is crucial for logging, debugging, API responses, and system integration. Let's explore how to effectively format errors to meet various needs in your application.
+Error formatting in ewrap provides flexible ways to present errors in different formats and contexts with proper timestamp formatting and enhanced serialization capabilities. This capability is crucial for logging, debugging, API responses, and system integration. Let's explore how to effectively format errors to meet various needs in your application.
 
 ## Understanding Error Formatting
 
 When an error occurs in your system, you might need to present it in different ways depending on the context:
 
-- As JSON for API responses
+- As JSON for API responses with proper timestamp formatting
 - As YAML for configuration-related errors
-- As structured text for logging
+- As structured text for logging with recovery suggestions
 - As user-friendly messages for end users
+- As serialized error groups for monitoring systems
 
-ewrap provides formatting options to handle all these cases while maintaining the rich context and metadata associated with your errors.
+ewrap provides comprehensive formatting options to handle all these cases while maintaining the rich context and metadata associated with your errors.
 
-## JSON Formatting
+## Enhanced JSON Formatting
 
-JSON formatting is particularly useful for API responses and structured logging. Here's how to work with JSON formatting in ewrap:
+JSON formatting now includes proper timestamp formatting and recovery suggestions:
 
 ```go
 func handleAPIError(w http.ResponseWriter, err error) {
     if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Convert error to JSON with full context
+        // Convert error to JSON with enhanced formatting
         jsonOutput, err := wrappedErr.ToJSON(
-            ewrap.WithTimestampFormat(time.RFC3339),
+            ewrap.WithTimestampFormat(time.RFC3339), // Proper timestamp formatting
             ewrap.WithStackTrace(true),
+            ewrap.WithRecoverySuggestion(true), // Include recovery guidance
         )
 
         if err != nil {
@@ -39,38 +41,87 @@ func handleAPIError(w http.ResponseWriter, err error) {
 }
 ```
 
-The resulting JSON might look like this:
+### Enhanced JSON Structure
+
+The resulting JSON now includes proper timestamp formatting and recovery suggestions:
 
 ```json
 {
     "message": "failed to process user order",
     "timestamp": "2024-03-15T14:30:00Z",
     "type": "database",
-    "severity": "error",
-    "stack": "main.processOrder:/app/main.go:42\nmain.handleRequest:/app/main.go:28",
+    "severity": "critical",
+    "stack_trace": [
+        {
+            "function": "main.processOrder",
+            "file": "/app/main.go",
+            "line": 42,
+            "pc": "0x4567890"
+        }
+    ],
     "metadata": {
         "user_id": "12345",
-        "order_id": "ORD-789",
-        "attempt": 1
+        "order_id": "ord_789",
+        "retry_count": 3
     },
-    "cause": {
-        "message": "database connection timeout",
-        "type": "database",
-        "severity": "critical"
-    }
+    "recovery_suggestion": "Check database connectivity and retry with exponential backoff"
 }
 ```
 
-## YAML Formatting
+## Timestamp Formatting Options
 
-YAML formatting can be particularly useful for configuration-related errors or when you need a more human-readable format:
+### Standard Formats
+
+ewrap supports various timestamp formats:
+
+```go
+// RFC3339 format (recommended for APIs and JSON)
+jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
+// Result: "2024-03-15T14:30:00Z"
+
+// RFC3339Nano for high precision
+jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat(time.RFC3339Nano))
+// Result: "2024-03-15T14:30:00.123456789Z"
+
+// Kitchen format for human-readable logs
+jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat(time.Kitchen))
+// Result: "2:30PM"
+
+// Custom format for specific requirements
+jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("2006-01-02 15:04:05"))
+// Result: "2024-03-15 14:30:00"
+```
+
+### Unix Timestamp Support
+
+For systems integration requiring Unix timestamps:
+
+```go
+// Unix timestamp (seconds since epoch)
+jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("unix"))
+// Result: "1710507000"
+
+// Unix timestamp with milliseconds
+jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("unix_milli"))
+// Result: "1710507000123"
+
+// Unix timestamp with microseconds
+jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("unix_micro"))
+// Result: "1710507000123456"
+```
+
+## YAML Formatting with Recovery Suggestions
+
+YAML formatting now supports recovery suggestions and enhanced metadata:
 
 ```go
 func logConfigurationError(err error, logger Logger) {
     if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Convert error to YAML for logging
+        // Convert error to YAML with recovery suggestions
         yamlOutput, err := wrappedErr.ToYAML(
+            ewrap.WithTimestampFormat(time.RFC3339),
             ewrap.WithStackTrace(true),
+            ewrap.WithRecoverySuggestion(true),
         )
 
         if err != nil {
@@ -83,24 +134,30 @@ func logConfigurationError(err error, logger Logger) {
 }
 ```
 
-The formatted YAML might look like this:
+### Enhanced YAML Structure
+
+The formatted YAML now includes recovery suggestions:
 
 ```yaml
 message: failed to load configuration
-timestamp: 2024-03-15T14:30:00Z
+timestamp: "2024-03-15T14:30:00Z"
 type: configuration
 severity: critical
-stack: |
-    main.loadConfig:/app/config.go:25
-    main.initialize:/app/main.go:15
+stack_trace:
+  - function: main.loadConfig
+    file: /app/config.go
+    line: 25
+    pc: "0x4567890"
+  - function: main.initialize
+    file: /app/main.go
+    line: 15
+    pc: "0x4567891"
 metadata:
     config_file: /etc/myapp/config.yaml
     invalid_fields:
         - database.host
         - database.port
-cause:
-    message: invalid port number
-    type: validation
+recovery_suggestion: "Check configuration file format and validate required fields"
 ```
 
 ## Custom Formatting
