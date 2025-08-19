@@ -5,6 +5,7 @@ package ewrap
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"strings"
 	"sync"
@@ -86,9 +87,7 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 		// Create a new metadata map with the existing values
 		metadata = make(map[string]any, len(wrappedErr.metadata))
 
-		for k, v := range wrappedErr.metadata {
-			metadata[k] = v
-		}
+		maps.Copy(metadata, wrappedErr.metadata)
 
 		wrappedErr.mu.RUnlock()
 	} else {
@@ -259,12 +258,23 @@ func (e *Error) Is(target error) bool {
 		return false
 	}
 
-	if target == e {
-		return true
-	}
+	err := e
+	for err != nil {
+		if err.msg == target.Error() {
+			return true
+		}
 
-	if e.cause != nil {
-		return errors.Is(e.cause, target)
+		if err.cause == nil {
+			return false
+		}
+
+		if causeErr, ok := err.cause.(*Error); ok {
+			err = causeErr
+
+			continue
+		}
+
+		return err.cause.Error() == target.Error()
 	}
 
 	return false
