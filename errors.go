@@ -165,6 +165,26 @@ func (e *Error) WithContext(ctx *ErrorContext) *Error {
 	return e
 }
 
+// WithRecoverySuggestion attaches recovery guidance to the error.
+func WithRecoverySuggestion(rs *RecoverySuggestion) Option {
+	return func(err *Error) {
+		err.mu.Lock()
+		err.metadata["recovery_suggestion"] = rs
+		err.mu.Unlock()
+
+		if err.logger != nil && rs != nil {
+			logData := []any{"message", rs.Message}
+			if len(rs.Actions) > 0 {
+				logData = append(logData, "actions", rs.Actions)
+			}
+			if rs.Documentation != "" {
+				logData = append(logData, "documentation", rs.Documentation)
+			}
+			err.logger.Info("recovery suggestion added", logData...)
+		}
+	}
+}
+
 // GetMetadata retrieves metadata from the error.
 func (e *Error) GetMetadata(key string) (any, bool) {
 	e.mu.RLock()
@@ -173,6 +193,26 @@ func (e *Error) GetMetadata(key string) (any, bool) {
 	val, ok := e.metadata[key]
 
 	return val, ok
+}
+
+// GetMetadataValue retrieves metadata and attempts to cast it to type T.
+func GetMetadataValue[T any](e *Error, key string) (T, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var zero T
+
+	val, ok := e.metadata[key]
+	if !ok {
+		return zero, false
+	}
+
+	typedVal, ok := val.(T)
+	if !ok {
+		return zero, false
+	}
+
+	return typedVal, true
 }
 
 // GetErrorContext retrieves the context from the error.
@@ -231,6 +271,18 @@ func (e *Error) Log() {
 	e.mu.RLock()
 
 	for k, v := range e.metadata {
+		if k == "recovery_suggestion" {
+			if rs, ok := v.(*RecoverySuggestion); ok {
+				logData = append(logData, "recovery_message", rs.Message)
+				if len(rs.Actions) > 0 {
+					logData = append(logData, "recovery_actions", rs.Actions)
+				}
+				if rs.Documentation != "" {
+					logData = append(logData, "recovery_documentation", rs.Documentation)
+				}
+			}
+			continue
+		}
 		logData = append(logData, k, v)
 	}
 

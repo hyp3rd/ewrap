@@ -242,6 +242,58 @@ func TestError_GetMetadata(t *testing.T) {
 	})
 }
 
+func TestError_GetMetadataValue(t *testing.T) {
+	err := New("test").WithMetadata("count", 5)
+
+	val, ok := GetMetadataValue[int](err, "count")
+	if !ok || val != 5 {
+		t.Errorf("expected typed metadata 5, got %v (ok=%v)", val, ok)
+	}
+
+	_, ok = GetMetadataValue[int](err, "missing")
+	if ok {
+		t.Error("expected missing key to return ok=false")
+	}
+}
+
+func TestWithRecoverySuggestion(t *testing.T) {
+	mockLogger := NewMockLogger()
+	rs := &RecoverySuggestion{Message: "restart"}
+	err := New("test", WithLogger(mockLogger), WithRecoverySuggestion(rs))
+
+	logs := mockLogger.GetLogs()
+	infoCount := 0
+	for _, l := range logs {
+		if l.Level == "info" {
+			infoCount++
+		}
+	}
+	if infoCount != 1 {
+		t.Error("expected info log when adding recovery suggestion")
+	}
+
+	retrieved, ok := GetMetadataValue[*RecoverySuggestion](err, "recovery_suggestion")
+	if !ok || retrieved.Message != rs.Message {
+		t.Error("expected recovery suggestion metadata to be set")
+	}
+
+	err.Log()
+	logs = mockLogger.GetLogs()
+	found := false
+	for _, entry := range logs {
+		if entry.Level == "error" {
+			for i := 0; i < len(entry.Args); i += 2 {
+				if entry.Args[i] == "recovery_message" && entry.Args[i+1] == rs.Message {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("expected recovery_message in error log")
+	}
+}
+
 func TestError_Stack(t *testing.T) {
 	err := New("test")
 	stack := err.Stack()
