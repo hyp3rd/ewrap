@@ -1,8 +1,10 @@
 package ewrap
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -145,10 +147,16 @@ func (eg *ErrorGroup) Errors() []error {
 	eg.mu.RLock()
 	defer eg.mu.RUnlock()
 
-	result := make([]error, len(eg.errors))
-	copy(result, eg.errors)
+	return slices.Clone(eg.errors)
+}
 
-	return result
+// Join aggregates all errors in the group using errors.Join.
+// It returns nil if the group is empty.
+func (eg *ErrorGroup) Join() error {
+	eg.mu.RLock()
+	defer eg.mu.RUnlock()
+
+	return errors.Join(eg.errors...)
 }
 
 // Clear removes all errors from the group while preserving capacity.

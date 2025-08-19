@@ -99,6 +99,24 @@ func setupZerolog() error {
 }
 ```
 
+### Slog Integration (Go 1.21+)
+
+```go
+import (
+    "log/slog"
+    "os"
+    "github.com/hyp3rd/ewrap/adapters"
+)
+
+func setupSlogLogger() error {
+    slogLogger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+    logger := adapters.NewSlogAdapter(slogLogger)
+
+    return ewrap.New("operation failed",
+        ewrap.WithLogger(logger))
+}
+```
+
 ## Advanced Logging Patterns
 
 ### Contextual Logging

@@ -22,9 +22,9 @@ defer eg.Release()  // Don't forget to release it back to the pool
 eg.Add(ewrap.New("validation failed for email"))
 eg.Add(ewrap.New("validation failed for password"))
 
-// Check if there are any errors
-if eg.HasErrors() {
-    fmt.Printf("Encountered errors: %v\n", eg.Error())
+// Aggregate errors using errors.Join
+if err := eg.Join(); err != nil {
+    fmt.Printf("Encountered errors: %v\n", err)
 }
 ```
 
