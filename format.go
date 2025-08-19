@@ -29,6 +29,8 @@ type ErrorOutput struct {
 	Context map[string]any `json:"context,omitempty" yaml:"context,omitempty"`
 	// Metadata contains user-defined metadata
 	Metadata map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	// Recovery provides guidance on resolving the error
+	Recovery *RecoverySuggestion `json:"recovery,omitempty" yaml:"recovery,omitempty"`
 }
 
 // FormatOption defines formatting options for error output.
@@ -67,6 +69,7 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	var (
 		ctx        *ErrorContext
 		contextMap map[string]any
+		recovery   *RecoverySuggestion
 	)
 
 	if rawCtx, ok := e.metadata["error_context"]; ok {
@@ -83,6 +86,10 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 		}
 	}
 
+	if rawRec, ok := e.metadata["recovery_suggestion"]; ok {
+		recovery, _ = rawRec.(*RecoverySuggestion)
+	}
+
 	// Create base output structure
 	output := &ErrorOutput{
 		Message:   e.msg,
@@ -92,11 +99,12 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 		Stack:     e.Stack(),
 		Context:   contextMap,
 		Metadata:  make(map[string]any),
+		Recovery:  recovery,
 	}
 
 	// Copy metadata excluding internal keys
 	for k, v := range e.metadata {
-		if k != "error_context" {
+		if k != "error_context" && k != "recovery_suggestion" {
 			output.Metadata[k] = v
 		}
 	}

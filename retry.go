@@ -19,8 +19,11 @@ type RetryInfo struct {
 	ShouldRetry func(error) bool
 }
 
+// RetryOption configures RetryInfo.
+type RetryOption func(*RetryInfo)
+
 // WithRetry adds retry information to the error.
-func WithRetry(maxAttempts int, delay time.Duration) Option {
+func WithRetry(maxAttempts int, delay time.Duration, opts ...RetryOption) Option {
 	return func(err *Error) {
 		retryInfo := &RetryInfo{
 			MaxAttempts: maxAttempts,
@@ -29,9 +32,22 @@ func WithRetry(maxAttempts int, delay time.Duration) Option {
 			ShouldRetry: defaultShouldRetry,
 		}
 
+		for _, opt := range opts {
+			opt(retryInfo)
+		}
+
 		err.mu.Lock()
 		err.metadata["retry_info"] = retryInfo
 		err.mu.Unlock()
+	}
+}
+
+// WithRetryShould sets a custom ShouldRetry function.
+func WithRetryShould(fn func(error) bool) RetryOption {
+	return func(ri *RetryInfo) {
+		if fn != nil {
+			ri.ShouldRetry = fn
+		}
 	}
 }
 
