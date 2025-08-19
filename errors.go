@@ -177,9 +177,11 @@ func WithRecoverySuggestion(rs *RecoverySuggestion) Option {
 			if len(rs.Actions) > 0 {
 				logData = append(logData, "actions", rs.Actions)
 			}
+
 			if rs.Documentation != "" {
 				logData = append(logData, "documentation", rs.Documentation)
 			}
+
 			err.logger.Info("recovery suggestion added", logData...)
 		}
 	}
@@ -270,20 +272,14 @@ func (e *Error) Log() {
 
 	e.mu.RLock()
 
-	for k, v := range e.metadata {
-		if k == "recovery_suggestion" {
-			if rs, ok := v.(*RecoverySuggestion); ok {
-				logData = append(logData, "recovery_message", rs.Message)
-				if len(rs.Actions) > 0 {
-					logData = append(logData, "recovery_actions", rs.Actions)
-				}
-				if rs.Documentation != "" {
-					logData = append(logData, "recovery_documentation", rs.Documentation)
-				}
-			}
+	for key, val := range e.metadata {
+		if key == "recovery_suggestion" {
+			logData = e.appendRecoverySuggestion(logData, val)
+
 			continue
 		}
-		logData = append(logData, k, v)
+
+		logData = append(logData, key, val)
 	}
 
 	e.mu.RUnlock()
@@ -333,4 +329,24 @@ func (e *Error) Is(target error) bool {
 // Unwrap provides compatibility with Go 1.13 error chains.
 func (e *Error) Unwrap() error {
 	return e.cause
+}
+
+// appendRecoverySuggestion extracts recovery suggestion data for logging.
+func (e *Error) appendRecoverySuggestion(logData []any, val any) []any {
+	rs, ok := val.(*RecoverySuggestion)
+	if !ok {
+		return logData
+	}
+
+	logData = append(logData, "recovery_message", rs.Message)
+
+	if len(rs.Actions) > 0 {
+		logData = append(logData, "recovery_actions", rs.Actions)
+	}
+
+	if rs.Documentation != "" {
+		logData = append(logData, "recovery_documentation", rs.Documentation)
+	}
+
+	return logData
 }
