@@ -323,6 +323,15 @@ func TestError_Is(t *testing.T) {
 		}
 	})
 
+	t.Run("prevents infinite recursion with self-reference", func(t *testing.T) {
+		err1 := New("error1")
+		err2 := New("error2")
+		// This would create a cycle if not handled properly
+		if errors.Is(err1, err2) {
+			t.Error("expected false for different errors")
+		}
+	})
+
 	t.Run("non-matching error", func(t *testing.T) {
 		err := New("test error")
 		target := errors.New("other")

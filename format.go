@@ -42,7 +42,8 @@ func WithTimestampFormat(format string) FormatOption {
 		}
 
 		// Attempt to parse existing timestamp and reformat
-		if t, err := time.Parse(time.RFC3339, eo.Timestamp); err == nil {
+		t, err := time.Parse(time.RFC3339, eo.Timestamp)
+		if err == nil {
 			eo.Timestamp = t.Format(format)
 		}
 	}
