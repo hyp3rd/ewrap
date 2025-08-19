@@ -2,21 +2,36 @@
 
 [![Go](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml/badge.svg)](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml) [![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://hyp3rd.github.io/ewrap/) [![Go Report Card](https://goreportcard.com/badge/github.com/hyp3rd/ewrap)](https://goreportcard.com/report/github.com/hyp3rd/ewrap) [![Go Reference](https://pkg.go.dev/badge/github.com/hyp3rd/ewrap.svg)](https://pkg.go.dev/github.com/hyp3rd/ewrap) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) ![GitHub Sponsors](https://img.shields.io/github/sponsors/hyp3rd)
 
-A sophisticated, configurable error wrapper for Go applications that provides comprehensive error handling capabilities with a focus on performance and flexibility.
+A sophisticated, modern error handling library for Go applications that provides comprehensive error management with advanced features, observability hooks, and seamless integration with Go 1.25+ features.
 
 ## Core Features
 
-- **Stack Traces**: Automatically captures and filters stack traces for meaningful error debugging
-- **Error Wrapping**: Maintains error chains while preserving context through the entire chain
-- **Metadata Attachment**: Attach and manage arbitrary key-value pairs to errors
-- **Logging Integration**: Flexible logger interface supporting major logging frameworks (logrus, zap, zerolog)
-- **Error Categorization**: Built-in error types and severity levels for better error handling
-- **Circuit Breaker Pattern**: Protect your systems from cascading failures
-- **Efficient Error Grouping**: Pool-based error group management for high-performance scenarios
-- **Context Preservation**: Rich error context including request IDs, user information, and operation details
-- **Thread-Safe Operations**: Safe for concurrent use in all operations
-- **Format Options**: JSON and YAML output support with customizable formatting
-- **Go 1.13+ Compatible**: Full support for `errors.Is`, `errors.As`, and error chains
+### Error Management & Context
+
+- **Advanced Stack Traces**: Programmatic stack frame inspection with iterators and structured access
+- **Smart Error Wrapping**: Maintains error chains with unified context handling and metadata preservation
+- **Rich Metadata**: Type-safe metadata attachment with optional generics support
+- **Context Integration**: Unified context handling preventing divergence between error context and metadata
+
+### Logging & Observability
+
+- **Modern Logging**: Support for slog (Go 1.21+), logrus, zap, zerolog with structured output
+- **Observability Hooks**: Built-in metrics and tracing for error frequencies and circuit-breaker states
+- **Recovery Guidance**: Integrated recovery suggestions in error output and logging
+
+### Performance & Efficiency
+
+- **Go 1.25+ Optimizations**: Uses `maps.Clone` and `slices.Clone` for efficient copying operations
+- **Pool-based Error Groups**: Memory-efficient error aggregation with `errors.Join` compatibility
+- **Thread-Safe Operations**: Zero-allocation hot paths with minimal contention
+- **Structured Serialization**: JSON/YAML export with full error group serialization
+
+### Advanced Features
+
+- **Circuit Breaker Pattern**: Protect systems from cascading failures with state transition monitoring
+- **Custom Retry Logic**: Configurable per-error retry strategies with `RetryInfo` extension
+- **Error Categorization**: Built-in types, severity levels, and optional generic type constraints
+- **Timestamp Formatting**: Proper timestamp formatting with customizable formats
 
 ## Installation
 
@@ -26,7 +41,7 @@ go get github.com/hyp3rd/ewrap
 
 ## Documentation
 
-`ewrap` has plenty of features with an exhaustive documentation, browse it [here](https://hyp3rd.github.io/ewrap/).
+`ewrap` provides comprehensive documentation covering all features and advanced usage patterns. Visit the [complete documentation](https://hyp3rd.github.io/ewrap/) for detailed guides, examples, and API reference.
 
 ## Usage Examples
 
@@ -46,24 +61,26 @@ if err != nil {
 err = ewrap.Newf("failed to process request id: %v", requestID)
 ```
 
-### Advanced Error Context
+### Advanced Error Context with Unified Handling
 
-Add rich context and metadata to errors:
+Add rich context and metadata with the new unified context system:
 
 ```go
 err := ewrap.New("operation failed",
     ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
-    ewrap.WithLogger(logger)).
+    ewrap.WithLogger(logger),
+    ewrap.WithRecoverySuggestion("Check database connection and retry")).
     WithMetadata("query", "SELECT * FROM users").
-    WithMetadata("retry_count", 3)
+    WithMetadata("retry_count", 3).
+    WithMetadata("connection_pool_size", 10)
 
-// Log the error with all context
+// Log the error with all context and recovery suggestions
 err.Log()
 ```
 
-### Error Groups with Pooling
+### Modern Error Groups with errors.Join Integration
 
-Use error groups efficiently in high-throughput scenarios:
+Use error groups efficiently with Go 1.25+ features:
 
 ```go
 // Create an error group pool with initial capacity
@@ -77,9 +94,88 @@ defer eg.Release()  // Return to pool when done
 eg.Add(err1)
 eg.Add(err2)
 
+// Use errors.Join compatibility for standard library integration
 if err := eg.Join(); err != nil {
     return err
 }
+
+// Or serialize the entire error group
+jsonOutput, _ := eg.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
+```
+
+### Stack Frame Inspection and Iteration
+
+Programmatically inspect stack traces:
+
+```go
+if wrappedErr, ok := err.(*ewrap.Error); ok {
+    // Get a stack iterator for programmatic access
+    iterator := wrappedErr.GetStackIterator()
+
+    for iterator.HasNext() {
+        frame := iterator.Next()
+        fmt.Printf("Function: %s\n", frame.Function)
+        fmt.Printf("File: %s:%d\n", frame.File, frame.Line)
+        fmt.Printf("PC: %x\n", frame.PC)
+    }
+
+    // Or get all frames at once
+    frames := wrappedErr.GetStackFrames()
+    for _, frame := range frames {
+        // Process each frame...
+    }
+}
+```
+
+### Custom Retry Logic with Extended RetryInfo
+
+Configure per-error retry strategies:
+
+```go
+// Define custom retry logic
+shouldRetry := func(err error, attempt int) bool {
+    if attempt >= 5 {
+        return false
+    }
+
+    // Custom logic based on error type
+    if wrappedErr, ok := err.(*ewrap.Error); ok {
+        return wrappedErr.ErrorType() == ewrap.ErrorTypeNetwork
+    }
+    return false
+}
+
+// Create error with custom retry configuration
+err := ewrap.New("network timeout",
+    ewrap.WithRetryInfo(3, time.Second*2, shouldRetry))
+
+// Use the retry information
+if retryInfo := err.GetRetryInfo(); retryInfo != nil {
+    if retryInfo.ShouldRetry(err, currentAttempt) {
+        // Perform retry logic
+    }
+}
+```
+
+### Observability Hooks and Monitoring
+
+Monitor error patterns and circuit breaker states:
+
+```go
+// Set up observability hooks
+observer := &MyObserver{
+    metricsClient: metricsClient,
+    tracer:       tracer,
+}
+
+// Create circuit breaker with observability
+cb := ewrap.NewCircuitBreaker("payment-service", 5, time.Minute*2,
+    ewrap.WithObserver(observer))
+
+// The observer will receive notifications for:
+// - Error frequency changes
+// - Circuit breaker state transitions
+// - Recovery suggestions triggered
 ```
 
 ### Circuit Breaker Pattern
@@ -167,9 +263,16 @@ type Logger interface {
 }
 ```
 
-Built-in adapters are provided for popular logging frameworks:
+Built-in adapters are provided for popular logging frameworks including modern slog support:
 
 ```go
+// Slog logger (Go 1.21+) - Recommended for new projects
+slogLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+    Level: slog.LevelDebug,
+}))
+err := ewrap.New("error occurred",
+    ewrap.WithLogger(adapters.NewSlogAdapter(slogLogger)))
+
 // Zap logger
 zapLogger, _ := zap.NewProduction()
 err := ewrap.New("error occurred",
@@ -184,37 +287,115 @@ err := ewrap.New("error occurred",
 zerologLogger := zerolog.New(os.Stdout)
 err := ewrap.New("error occurred",
     ewrap.WithLogger(adapters.NewZerologAdapter(zerologLogger)))
+```
 
-// Slog logger (Go 1.21+)
-slogLogger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-err := ewrap.New("error occurred",
-    ewrap.WithLogger(adapters.NewSlogAdapter(slogLogger)))
+### Recovery Suggestions in Logging
+
+Recovery suggestions are now automatically included in log output:
+
+```go
+err := ewrap.New("database connection failed",
+    ewrap.WithRecoverySuggestion("Check database connectivity and connection pool settings"))
+
+// When logged, includes recovery guidance for operations teams
+err.Log() // Outputs recovery suggestion in structured format
 ```
 
 ## Error Formatting
 
-Convert errors to structured formats:
+Convert errors to structured formats with proper timestamp formatting:
 
 ```go
-// Convert to JSON
+// Convert to JSON with proper timestamp formatting
 jsonStr, _ := err.ToJSON(
     ewrap.WithTimestampFormat(time.RFC3339),
+    ewrap.WithStackTrace(true),
+    ewrap.WithRecoverySuggestion(true))
+
+// Convert to YAML with custom formatting
+yamlStr, _ := err.ToYAML(
+    ewrap.WithTimestampFormat("2006-01-02T15:04:05Z07:00"),
     ewrap.WithStackTrace(true))
 
-// Convert to YAML
-yamlStr, _ := err.ToYAML(
-    ewrap.WithStackTrace(true))
+// Serialize entire error groups
+pool := ewrap.NewErrorGroupPool(4)
+eg := pool.Get()
+eg.Add(err1)
+eg.Add(err2)
+
+// Export all errors in the group
+groupJSON, _ := eg.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
+```
+
+### Modern Go Features Integration
+
+Leverage Go 1.25+ features for efficient operations:
+
+```go
+// Efficient metadata copying using maps.Clone
+originalErr := ewrap.New("base error").WithMetadata("key1", "value1")
+clonedErr := originalErr.Clone() // Uses maps.Clone internally
+
+// Error group integration with errors.Join
+eg := pool.Get()
+eg.Add(err1, err2, err3)
+standardErr := eg.Join() // Returns standard errors.Join result
+
+// Use with standard library error handling
+if errors.Is(standardErr, expectedErr) {
+    // Handle specific error type
+}
 ```
 
 ## Performance Considerations
 
-The package is designed with performance in mind:
+The package is designed with performance in mind and leverages modern Go features:
 
-- Error groups use sync.Pool for efficient memory usage
-- Minimal allocations in hot paths
-- Thread-safe operations with low contention
-- Pre-allocated buffers for string operations
+### Go 1.25+ Optimizations
+
+- Uses `maps.Clone` and `slices.Clone` for efficient copying operations
+- Zero-allocation paths for error creation and wrapping in hot paths
+- Optimized stack trace capture with intelligent filtering
+
+### Memory Management
+
+- Error groups use `sync.Pool` for efficient memory reuse
+- Stack frame iterators provide lazy evaluation
+- Minimal allocations during error metadata operations
+
+### Concurrency & Safety
+
+- Thread-safe operations with low lock contention
+- Atomic operations for circuit breaker state management
+- Lock-free observability hook notifications
+
+### Structured Operations
+
+- Pre-allocated buffers for JSON/YAML serialization
 - Efficient stack trace capture and filtering
+- Optimized metadata storage and retrieval
+
+## Observability Features
+
+### Built-in Monitoring
+
+- Error frequency tracking and reporting
+- Circuit breaker state transition monitoring
+- Recovery suggestion effectiveness metrics
+
+### Integration Points
+
+```go
+// Implement the Observer interface for custom monitoring
+type Observer interface {
+    OnErrorCreated(err *Error, context ErrorContext)
+    OnCircuitBreakerStateChange(name string, from, to CircuitState)
+    OnRecoverySuggestionTriggered(suggestion string, context ErrorContext)
+}
+
+// Register observers for monitoring
+ewrap.RegisterGlobalObserver(myObserver)
+```
 
 ## Development Setup
 

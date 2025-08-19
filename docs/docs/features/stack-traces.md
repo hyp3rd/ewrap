@@ -1,6 +1,6 @@
 # Stack Traces
 
-Stack traces are crucial for understanding where and why errors occur in your application. In ewrap, stack traces are automatically captured and enhanced to provide meaningful debugging information while maintaining performance.
+Stack traces are crucial for understanding where and why errors occur in your application. In ewrap, stack traces are automatically captured and enhanced to provide meaningful debugging information while maintaining performance. The latest version includes programmatic stack frame inspection through iterators and structured access.
 
 ## Understanding Stack Traces
 
@@ -25,27 +25,118 @@ The captured stack trace includes:
 - Function names
 - File names
 - Line numbers
-- Package information
+- Program counter (PC) values
 
 However, ewrap goes beyond simple capture by:
 
 1. Filtering out runtime implementation details
 2. Maintaining stack traces through error wrapping
 3. Providing formatted output options
+4. Offering programmatic access through iterators
 
-## Accessing Stack Traces
+## Programmatic Stack Frame Access
 
-You can access the stack trace of an error in several ways:
+### Using Stack Iterators
+
+The new stack iterator provides efficient, lazy access to stack frames:
 
 ```go
-func handleError(err error) {
+func analyzeError(err error) {
     if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Get the full stack trace as a string
-        stackTrace := wrappedErr.Stack()
+        iterator := wrappedErr.GetStackIterator()
 
-        fmt.Printf("Error occurred: %v\n", err)
-        fmt.Printf("Stack trace:\n%s", stackTrace)
+        for iterator.HasNext() {
+            frame := iterator.Next()
+
+            fmt.Printf("Function: %s\n", frame.Function)
+            fmt.Printf("File: %s:%d\n", frame.File, frame.Line)
+            fmt.Printf("PC: %x\n", frame.PC)
+
+            // Custom logic based on frame information
+            if strings.Contains(frame.Function, "database") {
+                handleDatabaseFrame(frame)
+            }
+        }
     }
+}
+```
+
+### Accessing All Frames
+
+Get all stack frames at once for batch processing:
+
+```go
+func generateErrorReport(err error) ErrorReport {
+    if wrappedErr, ok := err.(*ewrap.Error); ok {
+        frames := wrappedErr.GetStackFrames()
+
+        return ErrorReport{
+            Message: wrappedErr.Error(),
+            StackFrames: frames,
+            Timestamp: time.Now(),
+        }
+    }
+    return ErrorReport{}
+}
+```
+
+### Stack Frame Structure
+
+Each stack frame provides detailed information:
+
+```go
+type StackFrame struct {
+    Function string  `json:"function" yaml:"function"` // Fully qualified function name
+    File     string  `json:"file" yaml:"file"`         // Source file path
+    Line     int     `json:"line" yaml:"line"`         // Line number
+    PC       uintptr `json:"pc" yaml:"pc"`             // Program counter
+}
+```
+
+## Iterator Operations
+
+### Navigation and Control
+
+```go
+iterator := wrappedErr.GetStackIterator()
+
+// Check if more frames are available
+if iterator.HasNext() {
+    frame := iterator.Next()
+    // Process frame
+}
+
+// Reset iterator to beginning
+iterator.Reset()
+
+// Get remaining frames from current position
+remainingFrames := iterator.Frames()
+
+// Get all frames regardless of current position
+allFrames := iterator.AllFrames()
+```
+
+### Filtering and Processing
+
+```go
+func findApplicationFrames(err error) []StackFrame {
+    var appFrames []StackFrame
+
+    if wrappedErr, ok := err.(*ewrap.Error); ok {
+        iterator := wrappedErr.GetStackIterator()
+
+        for iterator.HasNext() {
+            frame := iterator.Next()
+
+            // Filter for application-specific frames
+            if strings.Contains(frame.File, "/myapp/") &&
+               !strings.Contains(frame.File, "/vendor/") {
+                appFrames = append(appFrames, *frame)
+            }
+        }
+    }
+
+    return appFrames
 }
 ```
 
