@@ -11,26 +11,24 @@ import (
 )
 
 func TestWithTimestampFormat(t *testing.T) {
+	tFixed := time.Date(2024, 1, 2, 15, 4, 5, 0, time.UTC)
 	output := &ErrorOutput{
-		Timestamp: time.Now(),
+		Timestamp: tFixed.Format(time.RFC3339),
 	}
 
 	// Test with non-empty format
 	opt := WithTimestampFormat("2006-01-02")
 	opt(output)
-
-	// Timestamp should be rounded to seconds
-	if output.Timestamp.Nanosecond() != 0 {
-		t.Error("Expected timestamp to be rounded to seconds")
+	expected := tFixed.Format("2006-01-02")
+	if output.Timestamp != expected {
+		t.Errorf("Expected timestamp %s, got %s", expected, output.Timestamp)
 	}
 
 	// Test with empty format
+	output.Timestamp = tFixed.Format(time.RFC3339)
 	opt = WithTimestampFormat("")
-	originalTime := output.Timestamp
 	opt(output)
-
-	// Timestamp should remain unchanged
-	if !output.Timestamp.Equal(originalTime) {
+	if output.Timestamp != tFixed.Format(time.RFC3339) {
 		t.Error("Expected timestamp to remain unchanged with empty format")
 	}
 }
@@ -162,9 +160,8 @@ func TestToErrorOutputWithOptions(t *testing.T) {
 		t.Error("Expected stack trace to be empty")
 	}
 
-	// Check that timestamp was rounded
-	if output.Timestamp.Nanosecond() != 0 {
-		t.Error("Expected timestamp to be rounded")
+	if _, err := time.Parse("2006-01-02", output.Timestamp); err != nil {
+		t.Errorf("Expected timestamp in format 2006-01-02, got %s", output.Timestamp)
 	}
 }
 
