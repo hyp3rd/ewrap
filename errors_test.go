@@ -302,34 +302,32 @@ func TestCaptureStack(t *testing.T) {
 func TestError_Is(t *testing.T) {
 	t.Run("returns false for nil target", func(t *testing.T) {
 		err := New("test")
-		if err.Is(nil) {
+		if errors.Is(err, nil) {
 			t.Error("expected false for nil target")
 		}
 	})
 
-	t.Run("matches message", func(t *testing.T) {
+	t.Run("matches sentinel error", func(t *testing.T) {
+		sentinel := errors.New("sentinel")
+		wrapped := Wrap(sentinel, "wrapped")
+		if !errors.Is(wrapped, sentinel) {
+			t.Error("expected true for sentinel error in chain")
+		}
+	})
+
+	t.Run("matches ewrap sentinel", func(t *testing.T) {
+		sentinel := New("sentinel")
+		wrapped := Wrap(sentinel, "wrapped")
+		if !errors.Is(wrapped, sentinel) {
+			t.Error("expected true for ewrap sentinel in chain")
+		}
+	})
+
+	t.Run("non-matching error", func(t *testing.T) {
 		err := New("test error")
-		target := errors.New("test error")
-		if !err.Is(target) {
-			t.Error("expected true for matching message")
-		}
-	})
-
-	t.Run("matches in chain", func(t *testing.T) {
-		original := New("original")
-		wrapped := Wrap(original, "wrapped")
-		target := errors.New("original")
-		if !wrapped.Is(target) {
-			t.Error("expected true for message in chain")
-		}
-	})
-
-	t.Run("matches standard error in chain", func(t *testing.T) {
-		original := errors.New("original")
-		wrapped := Wrap(original, "wrapped")
-		target := errors.New("original")
-		if !wrapped.Is(target) {
-			t.Error("expected true for standard error in chain")
+		target := errors.New("other")
+		if errors.Is(err, target) {
+			t.Error("expected false for non-matching error")
 		}
 	})
 }

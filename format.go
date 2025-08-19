@@ -16,7 +16,7 @@ type ErrorOutput struct {
 	// Message contains the main error message
 	Message string `json:"message" yaml:"message"`
 	// Timestamp indicates when the error occurred
-	Timestamp time.Time `json:"timestamp" yaml:"timestamp"`
+	Timestamp string `json:"timestamp" yaml:"timestamp"`
 	// Type categorizes the error
 	Type string `json:"type" yaml:"type"`
 	// Severity indicates the error's impact level
@@ -37,8 +37,13 @@ type FormatOption func(*ErrorOutput)
 // WithTimestampFormat allows customizing the timestamp format in the output.
 func WithTimestampFormat(format string) FormatOption {
 	return func(eo *ErrorOutput) {
-		if format != "" {
-			eo.Timestamp = eo.Timestamp.Round(time.Second)
+		if format == "" {
+			return
+		}
+
+		// Attempt to parse existing timestamp and reformat
+		if t, err := time.Parse(time.RFC3339, eo.Timestamp); err == nil {
+			eo.Timestamp = t.Format(format)
 		}
 	}
 }
@@ -80,7 +85,7 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	// Create base output structure
 	output := &ErrorOutput{
 		Message:   e.msg,
-		Timestamp: time.Now(),
+		Timestamp: time.Now().Format(time.RFC3339),
 		Type:      "unknown",
 		Severity:  "error",
 		Stack:     e.Stack(),
