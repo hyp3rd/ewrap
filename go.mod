@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	emperror.dev/emperror v0.33.0
 	emperror.dev/errors v0.8.1
+	github.com/goccy/go-json v0.10.5
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/rs/zerolog v1.34.0
 	github.com/sirupsen/logrus v1.9.3
