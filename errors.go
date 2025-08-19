@@ -25,7 +25,8 @@ type Error struct {
 	stack    []uintptr
 	metadata map[string]any
 	logger   logger.Logger
-	mu       sync.RWMutex // Protects metadata and logger
+	observer Observer
+	mu       sync.RWMutex // Protects metadata, logger, and observer
 }
 
 // Option defines the signature for configuration options.
@@ -45,6 +46,15 @@ func WithLogger(logger logger.Logger) Option {
 				"stack", err.Stack(),
 			)
 		}
+	}
+}
+
+// WithObserver sets an observer for the error.
+func WithObserver(observer Observer) Option {
+	return func(err *Error) {
+		err.mu.Lock()
+		err.observer = observer
+		err.mu.Unlock()
 	}
 }
 
@@ -77,6 +87,8 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 	var (
 		stack      []uintptr
 		metadata   map[string]any
+		observer   Observer
+		logger     logger.Logger
 		wrappedErr *Error
 	)
 	// If the error is already wrapped, preserve its stack trace and metadata
@@ -86,6 +98,8 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 		stack = wrappedErr.stack
 		// Clone metadata map using maps.Clone for simplicity
 		metadata = maps.Clone(wrappedErr.metadata)
+		observer = wrappedErr.observer
+		logger = wrappedErr.logger
 
 		wrappedErr.mu.RUnlock()
 	} else {
@@ -98,6 +112,8 @@ func Wrap(err error, msg string, opts ...Option) *Error {
 		cause:    err,
 		stack:    stack,
 		metadata: metadata,
+		observer: observer,
+		logger:   logger,
 	}
 
 	for _, opt := range opts {
@@ -252,11 +268,14 @@ func (e *Error) Stack() string {
 
 // Log logs the error using the configured logger.
 func (e *Error) Log() {
-	observer.RecordError(e.msg)
-
 	e.mu.RLock()
+	observer := e.observer
 	logger := e.logger
 	e.mu.RUnlock()
+
+	if observer != nil {
+		observer.RecordError(e.msg)
+	}
 
 	if logger == nil {
 		return
