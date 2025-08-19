@@ -261,3 +261,26 @@ func TestToErrorOutputWithMetadata(t *testing.T) {
 		t.Error("Expected error_context to be excluded from metadata")
 	}
 }
+
+func TestToErrorOutputWithRecoverySuggestion(t *testing.T) {
+	rs := &RecoverySuggestion{
+		Message:       "restart service",
+		Actions:       []string{"restart"},
+		Documentation: "https://example.com/recover",
+	}
+
+	err := New("test error", WithRecoverySuggestion(rs))
+	output := err.toErrorOutput()
+
+	if output.Recovery == nil {
+		t.Fatal("expected recovery suggestion to be present")
+	}
+
+	if output.Recovery.Message != rs.Message {
+		t.Errorf("expected recovery message '%s', got '%s'", rs.Message, output.Recovery.Message)
+	}
+
+	if output.Recovery.Documentation != rs.Documentation {
+		t.Errorf("expected documentation '%s', got '%s'", rs.Documentation, output.Recovery.Documentation)
+	}
+}

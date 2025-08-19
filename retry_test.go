@@ -42,6 +42,13 @@ func TestCanRetry(t *testing.T) {
 	})
 }
 
+func TestWithRetryCustomShouldRetry(t *testing.T) {
+	shouldRetry := func(error) bool { return false }
+	err := New("test error", WithRetry(3, time.Second, WithRetryShould(shouldRetry)))
+
+	assert.False(t, err.CanRetry())
+}
+
 func TestDefaultShouldRetry(t *testing.T) {
 	t.Run("ValidationError", func(t *testing.T) {
 		err := New("validation error").
