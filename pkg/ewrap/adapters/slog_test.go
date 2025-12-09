@@ -12,6 +12,7 @@ import (
 
 func TestSlogAdapter(t *testing.T) {
 	var buf bytes.Buffer
+
 	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	logger := slog.New(handler)
 	adapter := NewSlogAdapter(logger)
@@ -19,6 +20,7 @@ func TestSlogAdapter(t *testing.T) {
 	t.Run("LogLevels", func(t *testing.T) {
 		buf.Reset()
 		adapter.Error("error message", "key1", "value1")
+
 		output := buf.String()
 		assert.Contains(t, output, "error message")
 		assert.Contains(t, output, "key1")
@@ -26,6 +28,7 @@ func TestSlogAdapter(t *testing.T) {
 
 		buf.Reset()
 		adapter.Debug("debug message", "key2", "value2")
+
 		output = buf.String()
 		assert.Contains(t, output, "debug message")
 		assert.Contains(t, output, "key2")

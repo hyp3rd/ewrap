@@ -32,15 +32,15 @@ type Error struct {
 type Option func(*Error)
 
 // WithLogger sets a logger for the error.
-func WithLogger(logger logger.Logger) Option {
+func WithLogger(log logger.Logger) Option {
 	return func(err *Error) {
 		err.mu.Lock()
-		err.logger = logger
+		err.logger = log
 		err.mu.Unlock()
 
 		// Log error creation if logger is available
-		if logger != nil {
-			logger.Debug("error created",
+		if log != nil {
+			log.Debug("error created",
 				"message", err.msg,
 				"stack", err.Stack(),
 			)
@@ -255,10 +255,10 @@ func (e *Error) Log() {
 	observer.RecordError(e.msg)
 
 	e.mu.RLock()
-	logger := e.logger
+	log := e.logger
 	e.mu.RUnlock()
 
-	if logger == nil {
+	if log == nil {
 		return
 	}
 
@@ -286,7 +286,7 @@ func (e *Error) Log() {
 
 	e.mu.RUnlock()
 
-	logger.Error("error occurred", logData...)
+	log.Error("error occurred", logData...)
 }
 
 // CaptureStack captures the current stack trace.
@@ -334,7 +334,7 @@ func (e *Error) Unwrap() error {
 }
 
 // appendRecoverySuggestion extracts recovery suggestion data for logging.
-func (e *Error) appendRecoverySuggestion(logData []any, val any) []any {
+func (*Error) appendRecoverySuggestion(logData []any, val any) []any {
 	rs, ok := val.(*RecoverySuggestion)
 	if !ok {
 		return logData

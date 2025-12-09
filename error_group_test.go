@@ -40,6 +40,7 @@ func TestErrorGroupPool(t *testing.T) {
 				if got := len(eg.errors); got != tt.numErrors {
 					t.Errorf("Expected %d errors, got %d", tt.numErrors, got)
 				}
+
 				eg.Release()
 			}
 		})
@@ -48,11 +49,14 @@ func TestErrorGroupPool(t *testing.T) {
 
 func TestConcurrentPoolUsage(t *testing.T) {
 	pool := NewErrorGroupPool(4)
+
 	var wg sync.WaitGroup
+
 	numGoroutines := 100
 
 	wg.Add(numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
+
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
 
@@ -78,6 +82,7 @@ func BenchmarkErrorGroupPool(b *testing.B) {
 
 	b.Run("WithPool", func(b *testing.B) {
 		pool := NewErrorGroupPool(4)
+
 		b.ReportAllocs()
 
 		b.RunParallel(func(pb *testing.PB) {
@@ -86,6 +91,7 @@ func BenchmarkErrorGroupPool(b *testing.B) {
 				for _, err := range sampleErrors {
 					eg.Add(err)
 				}
+
 				_ = eg.Error()
 				eg.Release()
 			}
@@ -100,6 +106,7 @@ func BenchmarkErrorGroupPool(b *testing.B) {
 			for _, err := range sampleErrors {
 				eg.Add(err)
 			}
+
 			_ = eg.Error()
 		}
 	})
@@ -107,8 +114,8 @@ func BenchmarkErrorGroupPool(b *testing.B) {
 
 func TestErrorGroupJoin(t *testing.T) {
 	eg := NewErrorGroup()
-	err1 := fmt.Errorf("first")
-	err2 := fmt.Errorf("second")
+	err1 := errors.New("first")
+	err2 := errors.New("second")
 
 	eg.Add(err1)
 	eg.Add(err2)
@@ -117,11 +124,13 @@ func TestErrorGroupJoin(t *testing.T) {
 	if joined == nil {
 		t.Fatal("expected joined error")
 	}
+
 	if !errors.Is(joined, err1) || !errors.Is(joined, err2) {
 		t.Fatalf("joined error does not contain original errors")
 	}
 
 	eg.Clear()
+
 	if eg.Join() != nil {
 		t.Fatal("expected nil when joining empty group")
 	}

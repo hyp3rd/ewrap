@@ -19,6 +19,7 @@ func TestWithTimestampFormat(t *testing.T) {
 	// Test with non-empty format
 	opt := WithTimestampFormat("2006-01-02")
 	opt(output)
+
 	expected := tFixed.Format("2006-01-02")
 	if output.Timestamp != expected {
 		t.Errorf("Expected timestamp %s, got %s", expected, output.Timestamp)
@@ -28,6 +29,7 @@ func TestWithTimestampFormat(t *testing.T) {
 	output.Timestamp = tFixed.Format(time.RFC3339)
 	opt = WithTimestampFormat("")
 	opt(output)
+
 	if output.Timestamp != tFixed.Format(time.RFC3339) {
 		t.Error("Expected timestamp to remain unchanged with empty format")
 	}
@@ -179,7 +181,8 @@ func TestToJSON(t *testing.T) {
 
 	// Verify it's valid JSON
 	var output ErrorOutput
-	if unmarshalErr := json.Unmarshal([]byte(jsonStr), &output); unmarshalErr != nil {
+	unmarshalErr := json.Unmarshal([]byte(jsonStr), &output)
+	if unmarshalErr != nil {
 		t.Errorf("Failed to unmarshal JSON: %v", unmarshalErr)
 	}
 
@@ -218,7 +221,8 @@ func TestToYAML(t *testing.T) {
 
 	// Verify it's valid YAML
 	var output ErrorOutput
-	if unmarshalErr := yaml.Unmarshal([]byte(yamlStr), &output); unmarshalErr != nil {
+	unmarshalErr := yaml.Unmarshal([]byte(yamlStr), &output)
+	if unmarshalErr != nil {
 		t.Errorf("Failed to unmarshal YAML: %v", unmarshalErr)
 	}
 

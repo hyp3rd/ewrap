@@ -1,14 +1,17 @@
-GOLANGCI_LINT_VERSION = v2.4.0
+include .project-settings.env
 
-GOFILES_NOVENDOR = $(shell find . -type f -name '*.go' -not -path "./vendor/*" -not -path "./.git/*")
+GOLANGCI_LINT_VERSION ?= v2.7.1
+GO_VERSION ?= 1.25.5
+GCI_PREFIX ?= github.com/hyp3rd/ewrap
+PROTO_ENABLED ?= true
 
-# Version environment variable to use in the build process
-GITVERSION = $(shell gitversion | jq .SemVer)
-GITVERSION_NOT_INSTALLED = "gitversion is not installed: https://github.com/GitTools/GitVersion"
-
+GOFILES = $(shell find . -type f -name '*.go' -not -path "./pkg/api/*" -not -path "./vendor/*" -not -path "./.gocache/*" -not -path "./.git/*")
 
 test:
 	go test -v -timeout 5m -cover ./...
+
+test-race:
+	go test -race ./...
 
 benchmark:
 	go test -bench=. -benchmem ./pkg/ewrap
@@ -26,8 +29,6 @@ prepare-toolchain:
 
 	$(call check_command_exists,go) || (echo "golang is not present on the system, download and install it at https://go.dev/dl" && exit 1)
 
-	$(call check_command_exists,gitversion) || (echo "${GITVERSION_NOT_INSTALLED}" && exit 1)
-
 	@echo "Installing gci...\n"
 	$(call check_command_exists,gci) || go install github.com/daixiang0/gci@latest
 
@@ -35,10 +36,16 @@ prepare-toolchain:
 	$(call check_command_exists,gofumpt) || go install mvdan.cc/gofumpt@latest
 
 	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)...\n"
-	$(call check_command_exists,golangci-lint) || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin" $(GOLANGCI_LINT_VERSION)
+	$(call check_command_exists,golangci-lint) || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" $(GOLANGCI_LINT_VERSION)
 
 	@echo "Installing staticcheck...\n"
 	$(call check_command_exists,staticcheck) || go install honnef.co/go/tools/cmd/staticcheck@latest
+
+	@echo "Installing govulncheck...\n"
+	$(call check_command_exists,govulncheck) || go install golang.org/x/vuln/cmd/govulncheck@latest
+
+	@echo "Installing gosec...\n"
+	$(call check_command_exists,gosec) || go install github.com/securego/gosec/v2/cmd/gosec@latest
 
 	@echo "Checking if pre-commit is installed..."
 	pre-commit --version || (echo "pre-commit is not installed, install it with 'pip install pre-commit'" && exit 1)
@@ -46,25 +53,51 @@ prepare-toolchain:
 	@echo "Initializing pre-commit..."
 	pre-commit validate-config || pre-commit install && pre-commit install-hooks
 
-	@echo "Installing pre-commit hooks..."
-	pre-commit install
-	pre-commit install-hooks
+update-toolchain:
+	@echo "Updating gci...\n"
+	go install github.com/daixiang0/gci@latest
 
+	@echo "Updating gofumpt...\n"
+	go install mvdan.cc/gofumpt@latest
+
+	@echo "Updating govulncheck...\n"
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+
+	@echo "Updating gosec...\n"
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+	@echo "Updating staticcheck...\n"
+	go install honnef.co/go/tools/cmd/staticcheck@latest
 
 lint: prepare-toolchain
-	@echo "Running gci..."
-	@for file in ${GOFILES_NOVENDOR}; do \
-		gci write -s standard -s default -s "prefix(github.com/hyp3rd)" -s blank -s dot -s alias -s localmodule --skip-vendor --skip-generated $$file; \
+	@for file in ${GOFILES}; do \
+		gci write -s standard -s default -s blank -s dot -s "prefix($(GCI_PREFIX))" -s localmodule --skip-vendor --skip-generated $$file; \
 	done
 
 	@echo "\nRunning gofumpt..."
-	gofumpt -l -w ${GOFILES_NOVENDOR}
+	gofumpt -l -w ${GOFILES}
 
 	@echo "\nRunning staticcheck..."
 	staticcheck ./...
 
 	@echo "\nRunning golangci-lint $(GOLANGCI_LINT_VERSION)..."
-	golangci-lint run --fix -v  ./......
+	golangci-lint run -v --fix ./...
+
+vet:
+	@echo "Running go vet..."
+
+	$(call check_command_exists,shadow) || go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@latest
+
+	@for file in ${GOFILES}; do \
+		go vet -vettool=$(shell which shadow) $$file; \
+	done
+
+sec:
+	@echo "Running govulncheck..."
+	govulncheck ./...
+
+	@echo "\nRunning gosec..."
+	gosec -exclude-generated ./...
 
 # check_command_exists is a helper function that checks if a command exists.
 define check_command_exists
@@ -81,10 +114,15 @@ help:
 	@echo
 	@echo "test\t\t\t\tRun all tests in the project."
 	@echo "update-deps\t\t\tUpdate all dependencies in the project."
+	@echo "prepare-toolchain\t\tPrepare the development toolchain by installing necessary tools."
+	@echo "update-toolchain\t\tUpdate the development toolchain tools to their latest versions."
+	@echo "benchmark\t\t\tRun benchmarks for the project."
+	@echo "sec\t\t\t\tRun the govulncheck and gosec security analysis tools on all packages in the project."
+	@echo "vet\t\t\t\tRun go vet and shadow analysis on all packages in the project."
 	@echo "lint\t\t\t\tRun the staticcheck and golangci-lint static analysis tools on all packages in the project."
 	@echo
 	@echo "help\t\t\t\tPrint this help message."
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: prepare-toolchain test benchmark update-deps lint help
+.PHONY: prepare-toolchain update-toolchain sec vet test benchmark update-deps lint help

@@ -1,4 +1,3 @@
-// Package ewrap provides enhanced error handling capabilities
 package ewrap
 
 import (
@@ -14,19 +13,19 @@ import (
 // serialized to various formats like JSON and YAML.
 type ErrorOutput struct {
 	// Message contains the main error message
-	Message string `json:"message" yaml:"message"`
+	Message string `json:"message"            yaml:"message"`
 	// Timestamp indicates when the error occurred
-	Timestamp string `json:"timestamp" yaml:"timestamp"`
+	Timestamp string `json:"timestamp"          yaml:"timestamp"`
 	// Type categorizes the error
-	Type string `json:"type" yaml:"type"`
+	Type string `json:"type"               yaml:"type"`
 	// Severity indicates the error's impact level
-	Severity string `json:"severity" yaml:"severity"`
+	Severity string `json:"severity"           yaml:"severity"`
 	// Stack contains the error stack trace
-	Stack string `json:"stack" yaml:"stack"`
+	Stack string `json:"stack"              yaml:"stack"`
 	// Cause contains the underlying error if any
-	Cause *ErrorOutput `json:"cause,omitempty" yaml:"cause,omitempty"`
+	Cause *ErrorOutput `json:"cause,omitempty"    yaml:"cause,omitempty"`
 	// Context contains additional error context
-	Context map[string]any `json:"context,omitempty" yaml:"context,omitempty"`
+	Context map[string]any `json:"context,omitempty"  yaml:"context,omitempty"`
 	// Metadata contains user-defined metadata
 	Metadata map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 	// Recovery provides guidance on resolving the error
@@ -106,11 +105,7 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	}
 
 	// Copy metadata excluding internal keys
-	for k, v := range e.metadata {
-		if k != "error_context" && k != "recovery_suggestion" {
-			output.Metadata[k] = v
-		}
-	}
+	copyMetadata(e, output)
 
 	// Set error type and severity if available
 	if ctx != nil {
@@ -133,11 +128,25 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	}
 
 	// Apply formatting options
+	applyFormatOptions(output, opts...)
+
+	return output
+}
+
+// applyFormatOptions applies the given formatting options to the ErrorOutput.
+func applyFormatOptions(output *ErrorOutput, opts ...FormatOption) {
 	for _, opt := range opts {
 		opt(output)
 	}
+}
 
-	return output
+// copyMetadata copies user-defined metadata from the Error to the ErrorOutput.
+func copyMetadata(e *Error, output *ErrorOutput) {
+	for k, v := range e.metadata {
+		if k != "error_context" && k != "recovery_suggestion" {
+			output.Metadata[k] = v
+		}
+	}
 }
 
 // ToJSON converts the error to a JSON string.

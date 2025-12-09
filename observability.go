@@ -14,13 +14,18 @@ type noopObserver struct{}
 func (noopObserver) RecordError(string)                                              {}
 func (noopObserver) RecordCircuitStateTransition(string, CircuitState, CircuitState) {}
 
+// Global noop observer instance.
+//
+//nolint:gochecknoglobals
 var observer Observer = noopObserver{}
 
 // SetObserver sets the global observer. Passing nil resets to a no-op observer.
-func SetObserver(o Observer) {
-	if o == nil {
+func SetObserver(noopObs Observer) {
+	if noopObs == nil {
 		observer = noopObserver{}
+
 		return
 	}
-	observer = o
+
+	observer = noopObs
 }

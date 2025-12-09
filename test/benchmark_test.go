@@ -10,14 +10,14 @@ import (
 	"github.com/hyp3rd/ewrap"
 )
 
-// mockLogger implements a minimal logger for benchmarking
+// mockLogger implements a minimal logger for benchmarking.
 type mockLogger struct{}
 
 func (m *mockLogger) Error(msg string, keysAndValues ...any) {}
 func (m *mockLogger) Debug(msg string, keysAndValues ...any) {}
 func (m *mockLogger) Info(msg string, keysAndValues ...any)  {}
 
-// BenchmarkNew measures the performance of creating new errors
+// BenchmarkNew measures the performance of creating new errors.
 func BenchmarkNew(b *testing.B) {
 	logger := &mockLogger{}
 	ctx := context.Background()
@@ -61,7 +61,7 @@ func BenchmarkNew(b *testing.B) {
 	})
 }
 
-// BenchmarkWrap measures the performance of wrapping errors
+// BenchmarkWrap measures the performance of wrapping errors.
 func BenchmarkWrap(b *testing.B) {
 	logger := &mockLogger{}
 	ctx := context.Background()
@@ -106,7 +106,7 @@ func BenchmarkWrap(b *testing.B) {
 	})
 }
 
-// BenchmarkErrorGroup measures the performance of error group operations
+// BenchmarkErrorGroup measures the performance of error group operations.
 func BenchmarkErrorGroup(b *testing.B) {
 	b.Run("AddErrors", func(b *testing.B) {
 		b.ReportAllocs()
@@ -114,7 +114,7 @@ func BenchmarkErrorGroup(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			group := ewrap.NewErrorGroup()
 
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				group.Add(fmt.Errorf("error %d", j))
 			}
 		}
@@ -122,6 +122,7 @@ func BenchmarkErrorGroup(b *testing.B) {
 
 	b.Run("ConcurrentAdd", func(b *testing.B) {
 		group := ewrap.NewErrorGroup()
+
 		b.RunParallel(func(pb *testing.PB) {
 			i := 0
 			for pb.Next() {
@@ -132,7 +133,7 @@ func BenchmarkErrorGroup(b *testing.B) {
 	})
 }
 
-// BenchmarkFormatting measures the performance of error formatting
+// BenchmarkFormatting measures the performance of error formatting.
 func BenchmarkFormatting(b *testing.B) {
 	err := ewrap.New("test error",
 		ewrap.WithContext(context.Background(), ewrap.ErrorTypeDatabase, ewrap.SeverityError)).
@@ -149,6 +150,7 @@ func BenchmarkFormatting(b *testing.B) {
 
 	b.Run("ToJSONWithOptions", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for i := 0; i < b.N; i++ {
 			_, _ = err.ToJSON(
 				ewrap.WithTimestampFormat(time.RFC3339),
@@ -166,7 +168,7 @@ func BenchmarkFormatting(b *testing.B) {
 	})
 }
 
-// BenchmarkCircuitBreaker measures the performance of circuit breaker operations
+// BenchmarkCircuitBreaker measures the performance of circuit breaker operations.
 func BenchmarkCircuitBreaker(b *testing.B) {
 	b.Run("RecordFailure", func(b *testing.B) {
 		cb := ewrap.NewCircuitBreaker("test", 5, time.Second)
@@ -175,6 +177,7 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			cb.RecordFailure()
+
 			if i%5 == 0 {
 				cb.RecordSuccess() // Reset occasionally
 			}
@@ -196,13 +199,14 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 	})
 }
 
-// BenchmarkMetadataOperations measures the performance of metadata operations
+// BenchmarkMetadataOperations measures the performance of metadata operations.
 func BenchmarkMetadataOperations(b *testing.B) {
 	b.Run("AddMetadata", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for i := 0; i < b.N; i++ {
 			err := ewrap.New("test error")
-			for j := 0; j < 5; j++ {
+			for j := range 5 {
 				err.WithMetadata(fmt.Sprintf("key%d", j), j)
 			}
 		}
@@ -210,7 +214,7 @@ func BenchmarkMetadataOperations(b *testing.B) {
 
 	b.Run("GetMetadata", func(b *testing.B) {
 		err := ewrap.New("test error")
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			err.WithMetadata(fmt.Sprintf("key%d", i), i)
 		}
 
@@ -223,7 +227,7 @@ func BenchmarkMetadataOperations(b *testing.B) {
 	})
 }
 
-// BenchmarkStackTrace measures the performance of stack trace operations
+// BenchmarkStackTrace measures the performance of stack trace operations.
 func BenchmarkStackTrace(b *testing.B) {
 	err := ewrap.New("test error")
 

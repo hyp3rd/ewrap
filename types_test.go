@@ -56,9 +56,11 @@ func TestErrorTypeConstants(t *testing.T) {
 	if ErrorTypeUnknown != 0 {
 		t.Errorf("ErrorTypeUnknown = %d, want 0", ErrorTypeUnknown)
 	}
+
 	if ErrorTypeValidation != 1 {
 		t.Errorf("ErrorTypeValidation = %d, want 1", ErrorTypeValidation)
 	}
+
 	if ErrorTypeExternal != 8 {
 		t.Errorf("ErrorTypeExternal = %d, want 8", ErrorTypeExternal)
 	}
@@ -69,9 +71,11 @@ func TestSeverityConstants(t *testing.T) {
 	if SeverityInfo != 0 {
 		t.Errorf("SeverityInfo = %d, want 0", SeverityInfo)
 	}
+
 	if SeverityWarning != 1 {
 		t.Errorf("SeverityWarning = %d, want 1", SeverityWarning)
 	}
+
 	if SeverityCritical != 3 {
 		t.Errorf("SeverityCritical = %d, want 3", SeverityCritical)
 	}
@@ -87,9 +91,11 @@ func TestRecoverySuggestion(t *testing.T) {
 	if rs.Message != "Test message" {
 		t.Errorf("RecoverySuggestion.Message = %v, want %v", rs.Message, "Test message")
 	}
+
 	if len(rs.Actions) != 2 {
 		t.Errorf("len(RecoverySuggestion.Actions) = %v, want %v", len(rs.Actions), 2)
 	}
+
 	if rs.Documentation != "https://example.com/docs" {
 		t.Errorf("RecoverySuggestion.Documentation = %v, want %v", rs.Documentation, "https://example.com/docs")
 	}

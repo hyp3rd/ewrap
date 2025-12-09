@@ -23,7 +23,7 @@ func TestZapAdapter(t *testing.T) {
 		adapter.Debug("debug message", "key3", "value3")
 
 		entries := recorded.All()
-		assert.Equal(t, 2, len(entries))
+		assert.Len(t, entries, 2)
 		assert.Equal(t, "error message", entries[0].Message)
 		assert.Equal(t, "info message", entries[1].Message)
 	})
@@ -31,14 +31,16 @@ func TestZapAdapter(t *testing.T) {
 	t.Run("InvalidKeyValuePairs", func(t *testing.T) {
 		recorded.TakeAll()
 		adapter.Info("test", 123, "value", "extra")
+
 		entries := recorded.All()
-		assert.Equal(t, 1, len(entries))
-		assert.Equal(t, 0, len(entries[0].ContextMap()))
+		assert.Len(t, entries, 1)
+		assert.Empty(t, entries[0].ContextMap())
 	})
 }
 
 func TestLogrusAdapter(t *testing.T) {
 	var buf bytes.Buffer
+
 	logger := logrus.New()
 	logger.Out = &buf
 	adapter := NewLogrusAdapter(logger)
@@ -67,12 +69,14 @@ func TestLogrusAdapter(t *testing.T) {
 
 func TestZerologAdapter(t *testing.T) {
 	var buf bytes.Buffer
+
 	logger := zerolog.New(&buf)
 	adapter := NewZerologAdapter(logger)
 
 	t.Run("LogLevels", func(t *testing.T) {
 		buf.Reset()
 		adapter.Error("error message", "key1", "value1")
+
 		output := buf.String()
 		assert.Contains(t, output, "error message")
 		assert.Contains(t, output, "key1")
@@ -80,6 +84,7 @@ func TestZerologAdapter(t *testing.T) {
 
 		buf.Reset()
 		adapter.Info("info message", "key2", 42)
+
 		output = buf.String()
 		assert.Contains(t, output, "info message")
 		assert.Contains(t, output, "key2")
@@ -89,6 +94,7 @@ func TestZerologAdapter(t *testing.T) {
 	t.Run("NonStringKeys", func(t *testing.T) {
 		buf.Reset()
 		adapter.Info("test", 123, "value")
+
 		output := buf.String()
 		assert.Contains(t, output, "test")
 		assert.NotContains(t, output, "123")

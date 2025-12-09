@@ -26,6 +26,7 @@ func (t *testObserver) RecordCircuitStateTransition(name string, from, to Circui
 
 func TestErrorLogRecordsObserver(t *testing.T) {
 	obs := &testObserver{}
+
 	SetObserver(obs)
 	defer SetObserver(nil)
 
@@ -39,6 +40,7 @@ func TestErrorLogRecordsObserver(t *testing.T) {
 
 func TestCircuitBreakerObserver(t *testing.T) {
 	obs := &testObserver{}
+
 	SetObserver(obs)
 	defer SetObserver(nil)
 
@@ -47,9 +49,11 @@ func TestCircuitBreakerObserver(t *testing.T) {
 
 	cb.RecordFailure()
 	time.Sleep(timeout + time.Millisecond)
+
 	if !cb.CanExecute() {
 		t.Fatalf("expected circuit breaker to allow execution after timeout")
 	}
+
 	cb.RecordSuccess()
 
 	expected := []stateChange{

@@ -3,10 +3,26 @@ ignorePaths: []
 dictionaryDefinitions: []
 dictionaries: []
 words:
+  - Atoi
   - codacy
+  - EDITMSG
+  - embeddedstructfieldcheck
   - excludeonly
+  - exhaustruct
   - Fprintf
   - Fprintln
+  - gofiber
+  - golines
+  - gomod
+  - govulncheck
+  - ints
+  - localmodule
+  - recvcheck
   - sarif
+  - securego
+  - strconv
+  - strs
+  - tagalign
+  - vettool
 ignoreWords: []
 import: []

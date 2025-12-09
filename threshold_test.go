@@ -16,15 +16,19 @@ func TestNewCircuitBreaker(t *testing.T) {
 	if cb.name != name {
 		t.Errorf("Expected name %s, got %s", name, cb.name)
 	}
+
 	if cb.maxFailures != maxFailures {
 		t.Errorf("Expected maxFailures %d, got %d", maxFailures, cb.maxFailures)
 	}
+
 	if cb.timeout != timeout {
 		t.Errorf("Expected timeout %v, got %v", timeout, cb.timeout)
 	}
+
 	if cb.state != CircuitClosed {
 		t.Errorf("Expected initial state %v, got %v", CircuitClosed, cb.state)
 	}
+
 	if cb.failureCount != 0 {
 		t.Errorf("Expected initial failure count 0, got %d", cb.failureCount)
 	}
@@ -35,18 +39,22 @@ func TestCircuitBreakerRecordFailure(t *testing.T) {
 
 	// First failure - should remain closed
 	cb.RecordFailure()
+
 	if cb.state != CircuitClosed {
 		t.Errorf("Expected state %v after first failure, got %v", CircuitClosed, cb.state)
 	}
+
 	if cb.failureCount != 1 {
 		t.Errorf("Expected failure count 1, got %d", cb.failureCount)
 	}
 
 	// Second failure - should open circuit
 	cb.RecordFailure()
+
 	if cb.state != CircuitOpen {
 		t.Errorf("Expected state %v after max failures, got %v", CircuitOpen, cb.state)
 	}
+
 	if cb.failureCount != 2 {
 		t.Errorf("Expected failure count 2, got %d", cb.failureCount)
 	}
@@ -57,6 +65,7 @@ func TestCircuitBreakerRecordSuccess(t *testing.T) {
 
 	// Record failure to open circuit
 	cb.RecordFailure()
+
 	if cb.state != CircuitOpen {
 		t.Error("Expected circuit to be open")
 	}
@@ -68,9 +77,11 @@ func TestCircuitBreakerRecordSuccess(t *testing.T) {
 
 	// Record success - should close circuit
 	cb.RecordSuccess()
+
 	if cb.state != CircuitClosed {
 		t.Errorf("Expected state %v after success in half-open, got %v", CircuitClosed, cb.state)
 	}
+
 	if cb.failureCount != 0 {
 		t.Errorf("Expected failure count reset to 0, got %d", cb.failureCount)
 	}
@@ -87,12 +98,14 @@ func TestCircuitBreakerCanExecute(t *testing.T) {
 
 	// Record failure to open circuit
 	cb.RecordFailure()
+
 	if cb.CanExecute() {
 		t.Error("Expected CanExecute to return false for open circuit")
 	}
 
 	// Wait for timeout and check transition to half-open
 	time.Sleep(timeout + 10*time.Millisecond)
+
 	if !cb.CanExecute() {
 		t.Error("Expected CanExecute to return true after timeout (half-open)")
 	}
@@ -101,6 +114,7 @@ func TestCircuitBreakerCanExecute(t *testing.T) {
 	cb.mu.RLock()
 	state := cb.state
 	cb.mu.RUnlock()
+
 	if state != CircuitHalfOpen {
 		t.Errorf("Expected state %v after timeout, got %v", CircuitHalfOpen, state)
 	}
@@ -109,20 +123,24 @@ func TestCircuitBreakerCanExecute(t *testing.T) {
 func TestCircuitBreakerOnStateChange(t *testing.T) {
 	cb := NewCircuitBreaker("test", 1, 5*time.Second)
 
-	var stateChanges []struct {
-		name string
-		from CircuitState
-		to   CircuitState
-	}
-	var mu sync.Mutex
+	var (
+		stateChanges []struct {
+			name string
+			from CircuitState
+			to   CircuitState
+		}
+		mu sync.Mutex
+	)
 
 	cb.OnStateChange(func(name string, from, to CircuitState) {
 		mu.Lock()
+
 		stateChanges = append(stateChanges, struct {
 			name string
 			from CircuitState
 			to   CircuitState
 		}{name, from, to})
+
 		mu.Unlock()
 	})
 
@@ -133,6 +151,7 @@ func TestCircuitBreakerOnStateChange(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	mu.Lock()
+
 	if len(stateChanges) != 1 {
 		t.Errorf("Expected 1 state change, got %d", len(stateChanges))
 	} else {
@@ -140,13 +159,16 @@ func TestCircuitBreakerOnStateChange(t *testing.T) {
 		if change.name != "test" {
 			t.Errorf("Expected name 'test', got %s", change.name)
 		}
+
 		if change.from != CircuitClosed {
 			t.Errorf("Expected from state %v, got %v", CircuitClosed, change.from)
 		}
+
 		if change.to != CircuitOpen {
 			t.Errorf("Expected to state %v, got %v", CircuitOpen, change.to)
 		}
 	}
+
 	mu.Unlock()
 }
 
@@ -177,24 +199,21 @@ func TestCircuitBreakerConcurrency(t *testing.T) {
 	cb := NewCircuitBreaker("test", 5, 100*time.Millisecond)
 
 	var wg sync.WaitGroup
+
 	iterations := 100
 
 	// Test concurrent RecordFailure calls
-	for i := 0; i < iterations; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range iterations {
+		wg.Go(func() {
 			cb.RecordFailure()
-		}()
+		})
 	}
 
 	// Test concurrent CanExecute calls
-	for i := 0; i < iterations; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range iterations {
+		wg.Go(func() {
 			cb.CanExecute()
-		}()
+		})
 	}
 
 	wg.Wait()

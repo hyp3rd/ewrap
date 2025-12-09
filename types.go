@@ -1,4 +1,3 @@
-// Package ewrap provides enhanced error handling capabilities
 package ewrap
 
 // ErrorType represents the type of error that occurred.
@@ -85,9 +84,9 @@ func (s Severity) String() string {
 // RecoverySuggestion provides guidance on how to recover from an error.
 type RecoverySuggestion struct {
 	// Message provides a human-readable explanation.
-	Message string `json:"message" yaml:"message"`
+	Message string `json:"message"       yaml:"message"`
 	// Actions lists specific steps that can be taken.
-	Actions []string `json:"actions" yaml:"actions"`
+	Actions []string `json:"actions"       yaml:"actions"`
 	// Documentation links to relevant documentation.
 	Documentation string `json:"documentation" yaml:"documentation"`
 }

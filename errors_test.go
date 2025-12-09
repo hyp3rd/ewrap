@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// MockLogger implements the logger.Logger interface for testing
+// MockLogger implements the logger.Logger interface for testing.
 type MockLogger struct {
 	mu     sync.Mutex
 	logs   []LogEntry
@@ -24,12 +24,14 @@ type LogEntry struct {
 func (m *MockLogger) Info(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.logs = append(m.logs, LogEntry{Level: "info", Msg: msg, Args: args})
 }
 
 func (m *MockLogger) Debug(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.logs = append(m.logs, LogEntry{Level: "debug", Msg: msg, Args: args})
 	m.called["debug"]++
 }
@@ -37,6 +39,7 @@ func (m *MockLogger) Debug(msg string, args ...any) {
 func (m *MockLogger) Error(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.logs = append(m.logs, LogEntry{Level: "error", Msg: msg, Args: args})
 	m.called["error"]++
 }
@@ -51,12 +54,14 @@ func NewMockLogger() *MockLogger {
 func (m *MockLogger) GetLogs() []LogEntry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	return m.logs
 }
 
 func (m *MockLogger) GetCallCount(level string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	return m.called[level]
 }
 
@@ -78,10 +83,12 @@ func TestNew(t *testing.T) {
 
 	t.Run("applies options", func(t *testing.T) {
 		mockLogger := NewMockLogger()
+
 		err := New("test error", WithLogger(mockLogger))
 		if err.logger != mockLogger {
 			t.Error("expected logger to be set")
 		}
+
 		if mockLogger.GetCallCount("debug") != 1 {
 			t.Error("expected logger debug to be called once")
 		}
@@ -90,6 +97,7 @@ func TestNew(t *testing.T) {
 
 func TestNewf(t *testing.T) {
 	err := Newf("test error %d", 42)
+
 	expected := "test error 42"
 	if err.Error() != expected {
 		t.Errorf("expected '%s', got '%s'", expected, err.Error())
@@ -111,9 +119,11 @@ func TestWrap(t *testing.T) {
 		if wrapped.msg != "wrapped" {
 			t.Errorf("expected message 'wrapped', got '%s'", wrapped.msg)
 		}
-		if wrapped.cause != originalErr {
+
+		if !errors.Is(wrapped.cause, originalErr) {
 			t.Error("expected cause to be set to original error")
 		}
+
 		expected := "wrapped: original error"
 		if wrapped.Error() != expected {
 			t.Errorf("expected '%s', got '%s'", expected, wrapped.Error())
@@ -127,6 +137,7 @@ func TestWrap(t *testing.T) {
 		if len(wrapped.stack) == 0 {
 			t.Error("expected stack trace to be preserved")
 		}
+
 		if val, ok := wrapped.GetMetadata("key"); !ok || val != "value" {
 			t.Error("expected metadata to be preserved")
 		}
@@ -144,6 +155,7 @@ func TestWrapf(t *testing.T) {
 	t.Run("wraps with formatted message", func(t *testing.T) {
 		originalErr := errors.New("original")
 		wrapped := Wrapf(originalErr, "wrapped %d", 42)
+
 		expected := "wrapped 42: original"
 		if wrapped.Error() != expected {
 			t.Errorf("expected '%s', got '%s'", expected, wrapped.Error())
@@ -162,6 +174,7 @@ func TestError_Error(t *testing.T) {
 	t.Run("returns message with cause", func(t *testing.T) {
 		cause := errors.New("cause error")
 		err := Wrap(cause, "wrapped")
+
 		expected := "wrapped: cause error"
 		if err.Error() != expected {
 			t.Errorf("expected '%s', got '%s'", expected, err.Error())
@@ -179,8 +192,9 @@ func TestError_Cause(t *testing.T) {
 
 	t.Run("returns cause for wrapped error", func(t *testing.T) {
 		cause := errors.New("original")
+
 		wrapped := Wrap(cause, "wrapped")
-		if wrapped.Cause() != cause {
+		if !errors.Is(wrapped.Cause(), cause) {
 			t.Error("expected cause to match original error")
 		}
 	})
@@ -198,6 +212,7 @@ func TestError_WithMetadata(t *testing.T) {
 	if !ok {
 		t.Error("expected metadata to be set")
 	}
+
 	if val != "value" {
 		t.Errorf("expected 'value', got '%v'", val)
 	}
@@ -226,6 +241,7 @@ func TestError_GetMetadata(t *testing.T) {
 		if !ok {
 			t.Error("expected key to exist")
 		}
+
 		if val != "value" {
 			t.Errorf("expected 'value', got '%v'", val)
 		}
@@ -236,6 +252,7 @@ func TestError_GetMetadata(t *testing.T) {
 		if ok {
 			t.Error("expected key to not exist")
 		}
+
 		if val != nil {
 			t.Errorf("expected nil value, got '%v'", val)
 		}
@@ -263,11 +280,13 @@ func TestWithRecoverySuggestion(t *testing.T) {
 
 	logs := mockLogger.GetLogs()
 	infoCount := 0
+
 	for _, l := range logs {
 		if l.Level == "info" {
 			infoCount++
 		}
 	}
+
 	if infoCount != 1 {
 		t.Error("expected info log when adding recovery suggestion")
 	}
@@ -278,8 +297,10 @@ func TestWithRecoverySuggestion(t *testing.T) {
 	}
 
 	err.Log()
+
 	logs = mockLogger.GetLogs()
 	found := false
+
 	for _, entry := range logs {
 		if entry.Level == "error" {
 			for i := 0; i < len(entry.Args); i += 2 {
@@ -289,6 +310,7 @@ func TestWithRecoverySuggestion(t *testing.T) {
 			}
 		}
 	}
+
 	if !found {
 		t.Error("expected recovery_message in error log")
 	}
@@ -306,6 +328,7 @@ func TestError_Stack(t *testing.T) {
 	if strings.Contains(stack, "runtime/") {
 		t.Error("stack should not contain runtime frames")
 	}
+
 	if strings.Contains(stack, "ewrap/errors.go") {
 		t.Error("stack should not contain error package frames")
 	}
@@ -361,6 +384,7 @@ func TestError_Is(t *testing.T) {
 
 	t.Run("matches sentinel error", func(t *testing.T) {
 		sentinel := errors.New("sentinel")
+
 		wrapped := Wrap(sentinel, "wrapped")
 		if !errors.Is(wrapped, sentinel) {
 			t.Error("expected true for sentinel error in chain")
@@ -369,6 +393,7 @@ func TestError_Is(t *testing.T) {
 
 	t.Run("matches ewrap sentinel", func(t *testing.T) {
 		sentinel := New("sentinel")
+
 		wrapped := Wrap(sentinel, "wrapped")
 		if !errors.Is(wrapped, sentinel) {
 			t.Error("expected true for ewrap sentinel in chain")
@@ -386,6 +411,7 @@ func TestError_Is(t *testing.T) {
 
 	t.Run("non-matching error", func(t *testing.T) {
 		err := New("test error")
+
 		target := errors.New("other")
 		if errors.Is(err, target) {
 			t.Error("expected false for non-matching error")
@@ -403,8 +429,9 @@ func TestError_Unwrap(t *testing.T) {
 
 	t.Run("returns cause for wrapped error", func(t *testing.T) {
 		cause := errors.New("original")
+
 		wrapped := Wrap(cause, "wrapped")
-		if wrapped.Unwrap() != cause {
+		if !errors.Is(wrapped.Unwrap(), cause) {
 			t.Error("expected unwrap to return cause")
 		}
 	})
@@ -424,6 +451,7 @@ func TestWithLogger(t *testing.T) {
 	if err.logger != mockLogger {
 		t.Error("expected logger to be set")
 	}
+
 	if mockLogger.GetCallCount("debug") != 1 {
 		t.Error("expected debug log to be called once")
 	}
@@ -434,17 +462,21 @@ func TestConcurrentAccess(t *testing.T) {
 
 	// Test concurrent metadata access
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(2)
+
 		go func(i int) {
 			defer wg.Done()
+
 			err.WithMetadata(fmt.Sprintf("key%d", i), i)
 		}(i)
 		go func(i int) {
 			defer wg.Done()
+
 			err.GetMetadata(fmt.Sprintf("key%d", i))
 		}(i)
 	}
+
 	wg.Wait()
 
 	// Should not panic or race

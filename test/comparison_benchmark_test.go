@@ -20,6 +20,7 @@ func BenchmarkErrorCreation(b *testing.B) {
 
 	b.Run("ewrap/New", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			_ = ewrap.New(msg)
 		}
@@ -27,6 +28,7 @@ func BenchmarkErrorCreation(b *testing.B) {
 
 	b.Run("pkg/errors/New", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			_ = errors.New(msg)
 		}
@@ -45,11 +47,13 @@ func BenchmarkErrorCreation(b *testing.B) {
 }
 
 func BenchmarkErrorWrapping(b *testing.B) {
-	baseErr := fmt.Errorf("base error")
+	baseErr := errors.New("base error")
+
 	const wrapMsg = "wrapped error"
 
 	b.Run("ewrap/Wrap", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			_ = ewrap.Wrap(baseErr, wrapMsg)
 		}
@@ -57,6 +61,7 @@ func BenchmarkErrorWrapping(b *testing.B) {
 
 	b.Run("pkg/errors/Wrap", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			_ = errors.Wrap(baseErr, wrapMsg)
 		}
@@ -64,6 +69,7 @@ func BenchmarkErrorWrapping(b *testing.B) {
 
 	b.Run("emperror/Wrap", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			_ = emperror.Wrap(baseErr, wrapMsg)
 		}
@@ -78,30 +84,35 @@ func BenchmarkErrorGroups(b *testing.B) {
 
 	b.Run("ewrap/ErrorGroup", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+
+		for range b.N {
 			group := ewrap.NewErrorGroup()
 			for _, err := range errs {
 				group.Add(err)
 			}
+
 			_ = group.Error()
 		}
 	})
 
 	b.Run("hashicorp/multierror", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+
+		for range b.N {
 			var result *multierror.Error
 
 			for _, err := range errs {
 				result = multierror.Append(result, err)
 			}
+
 			_ = result.Error()
 		}
 	})
 
 	b.Run("uber/multierr", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+
+		for range b.N {
 			var err error
 
 			for _, e := range errs {
