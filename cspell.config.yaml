@@ -18,6 +18,7 @@ words:
   - ints
   - localmodule
   - recvcheck
+  - goccy
   - sarif
   - securego
   - strconv

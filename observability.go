@@ -11,21 +11,9 @@ type Observer interface {
 // noopObserver provides a no-op implementation of the Observer interface.
 type noopObserver struct{}
 
+func newNoopObserver() Observer {
+	return noopObserver{}
+}
+
 func (noopObserver) RecordError(string)                                              {}
 func (noopObserver) RecordCircuitStateTransition(string, CircuitState, CircuitState) {}
-
-// Global noop observer instance.
-//
-//nolint:gochecknoglobals
-var observer Observer = noopObserver{}
-
-// SetObserver sets the global observer. Passing nil resets to a no-op observer.
-func SetObserver(noopObs Observer) {
-	if noopObs == nil {
-		observer = noopObserver{}
-
-		return
-	}
-
-	observer = noopObs
-}

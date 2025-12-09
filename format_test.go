@@ -1,12 +1,12 @@
 package ewrap
 
 import (
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 

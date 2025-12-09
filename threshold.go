@@ -13,6 +13,7 @@ type CircuitBreaker struct {
 	failureCount  int
 	lastFailure   time.Time
 	state         CircuitState
+	observer      Observer
 	mu            sync.RWMutex
 	onStateChange func(name string, from, to CircuitState)
 }
@@ -31,11 +32,21 @@ const (
 
 // NewCircuitBreaker creates a new circuit breaker.
 func NewCircuitBreaker(name string, maxFailures int, timeout time.Duration) *CircuitBreaker {
+	return NewCircuitBreakerWithObserver(name, maxFailures, timeout, nil)
+}
+
+// NewCircuitBreakerWithObserver creates a new circuit breaker with an observer.
+func NewCircuitBreakerWithObserver(name string, maxFailures int, timeout time.Duration, observer Observer) *CircuitBreaker {
+	if observer == nil {
+		observer = newNoopObserver()
+	}
+
 	return &CircuitBreaker{
 		name:        name,
 		maxFailures: maxFailures,
 		timeout:     timeout,
 		state:       CircuitClosed,
+		observer:    observer,
 	}
 }
 
@@ -44,6 +55,18 @@ func (cb *CircuitBreaker) OnStateChange(callback func(name string, from, to Circ
 	cb.mu.Lock()
 	cb.onStateChange = callback
 	cb.mu.Unlock()
+}
+
+// SetObserver sets an observer for the circuit breaker.
+func (cb *CircuitBreaker) SetObserver(observer Observer) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	if observer == nil {
+		observer = newNoopObserver()
+	}
+
+	cb.observer = observer
 }
 
 // RecordFailure records a failure and potentially opens the circuit.
@@ -104,7 +127,9 @@ func (cb *CircuitBreaker) transitionTo(newState CircuitState) {
 	oldState := cb.state
 	cb.state = newState
 
-	observer.RecordCircuitStateTransition(cb.name, oldState, newState)
+	if cb.observer != nil {
+		cb.observer.RecordCircuitStateTransition(cb.name, oldState, newState)
+	}
 
 	if cb.onStateChange != nil {
 		go cb.onStateChange(cb.name, oldState, newState)

@@ -4,9 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/goccy/go-json"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -164,4 +169,116 @@ func (eg *ErrorGroup) Clear() {
 	eg.mu.Lock()
 	eg.errors = eg.errors[:0]
 	eg.mu.Unlock()
+}
+
+// SerializableError represents an error in a serializable format.
+type SerializableError struct {
+	Message    string             `json:"message"               yaml:"message"`
+	Type       string             `json:"type"                  yaml:"type"`
+	StackTrace []StackFrame       `json:"stack_trace,omitempty" yaml:"stack_trace,omitempty"`
+	Metadata   map[string]any     `json:"metadata,omitempty"    yaml:"metadata,omitempty"`
+	Cause      *SerializableError `json:"cause,omitempty"       yaml:"cause,omitempty"`
+}
+
+// ErrorGroupSerialization represents the serializable format of an ErrorGroup.
+type ErrorGroupSerialization struct {
+	ErrorCount int                 `json:"error_count" yaml:"error_count"`
+	Timestamp  string              `json:"timestamp"   yaml:"timestamp"`
+	Errors     []SerializableError `json:"errors"      yaml:"errors"`
+}
+
+// toSerializableError converts an error to a SerializableError.
+func toSerializableError(err error) SerializableError {
+	if err == nil {
+		return SerializableError{}
+	}
+
+	serErr := SerializableError{
+		Message: err.Error(),
+		Type:    "standard",
+	}
+
+	// Check if it's our custom Error type
+	customErr := &Error{}
+	if errors.As(err, &customErr) {
+		serErr.Type = "ewrap"
+		serErr.StackTrace = customErr.GetStackFrames()
+
+		// Get metadata safely
+		customErr.mu.RLock()
+
+		if len(customErr.metadata) > 0 {
+			serErr.Metadata = make(map[string]any, len(customErr.metadata))
+			maps.Copy(serErr.Metadata, customErr.metadata)
+		}
+
+		customErr.mu.RUnlock()
+
+		// Handle cause
+		if customErr.cause != nil {
+			cause := toSerializableError(customErr.cause)
+			serErr.Cause = &cause
+		}
+	}
+
+	return serErr
+}
+
+// ToSerialization converts the ErrorGroup to a serializable format.
+func (eg *ErrorGroup) ToSerialization() ErrorGroupSerialization {
+	eg.mu.RLock()
+	defer eg.mu.RUnlock()
+
+	serializable := ErrorGroupSerialization{
+		ErrorCount: len(eg.errors),
+		Timestamp:  time.Now().Format(time.RFC3339),
+		Errors:     make([]SerializableError, len(eg.errors)),
+	}
+
+	for i, err := range eg.errors {
+		serializable.Errors[i] = toSerializableError(err)
+	}
+
+	return serializable
+}
+
+// ToJSON converts the ErrorGroup to JSON format.
+func (eg *ErrorGroup) ToJSON() (string, error) {
+	serializable := eg.ToSerialization()
+
+	data, err := json.MarshalIndent(serializable, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal ErrorGroup to JSON: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// ToYAML converts the ErrorGroup to YAML format.
+func (eg *ErrorGroup) ToYAML() (string, error) {
+	serializable := eg.ToSerialization()
+
+	data, err := yaml.Marshal(serializable)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal ErrorGroup to YAML: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// MarshalJSON implements the json.Marshaler interface.
+func (eg *ErrorGroup) MarshalJSON() ([]byte, error) {
+	serializable := eg.ToSerialization()
+
+	data, err := json.Marshal(serializable)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ErrorGroup to JSON: %w", err)
+	}
+
+	return data, nil
+}
+
+// MarshalYAML implements the yaml.Marshaler interface.
+func (eg *ErrorGroup) MarshalYAML() (any, error) {
+	return eg.ToSerialization(), nil
 }
