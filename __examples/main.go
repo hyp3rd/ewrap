@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/hyp3rd/ewrap"
-	"github.com/hyp3rd/ewrap/adapters"
+	"github.com/hyp3rd/ewrap/pkg/logger/adapters"
 )
 
 func main() {
