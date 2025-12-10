@@ -29,7 +29,7 @@ ewrap provides adapters for popular logging frameworks. Here's how to use them:
 ```go
 import (
     "go.uber.org/zap"
-    "github.com/hyp3rd/ewrap/adapters"
+    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
 )
 
 func setupZapLogger() error {
@@ -59,7 +59,7 @@ func setupZapLogger() error {
 ```go
 import (
     "github.com/sirupsen/logrus"
-    "github.com/hyp3rd/ewrap/adapters"
+    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
 )
 
 func setupLogrusLogger() error {
@@ -82,7 +82,7 @@ func setupLogrusLogger() error {
 ```go
 import (
     "github.com/rs/zerolog"
-    "github.com/hyp3rd/ewrap/adapters"
+    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
 )
 
 func setupZerolog() error {
@@ -105,7 +105,7 @@ func setupZerolog() error {
 import (
     "log/slog"
     "os"
-    "github.com/hyp3rd/ewrap/adapters"
+    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
 )
 
 func setupSlogLogger() error {
