@@ -1,0 +1,9 @@
+# Custom Dictionary Words
+Errorf
+goexit
+golangci
+myapp
+Println
+retryable
+Retryable
+uintptr

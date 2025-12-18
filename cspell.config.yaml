@@ -1,5 +1,30 @@
 version: "0.2"
-ignorePaths: []
+ignorePaths:
+  - go.mod
+  - go.sum
+  - Makefile
+  - .golangci-lint.yml
+  - .golangci.yaml
+  - Dockerfile
+  - .gitignore
+  - .dockerignore
+  - "*.pb.*"
+  - "*.sql"
+  - "*.svg"
+  - docker/*
+  - "*.excalidraw"
+  - .vscode/*
+  - azdo/pipelines/*
+  - scripts/*
+  - .github/workflows/*
+  - .github/*
+  - .idea/*
+  - .DS_Store
+  - "*.hcl"
+  - "*.env"
+  - "*.http"
+  - compose.*.yaml
+  - docs/mkdocs.yml
 dictionaryDefinitions:
   - name: custom-dictionary
     path: ./.cspell/custom-dictionary.txt
@@ -9,25 +34,62 @@ dictionaries:
 words:
   - Atoi
   - codacy
+  - daixiang
+  - eamodio
   - EDITMSG
   - embeddedstructfieldcheck
+  - emperror
+  - errname
+  - esbenp
+  - ewrap
+  - excalidraw
   - excludeonly
   - exhaustruct
   - Fprintf
   - Fprintln
+  - Getenv
+  - gocache
+  - goccy
   - gofiber
+  - GOFILES
   - golines
   - gomod
+  - goroutines
+  - GOPATH
+  - GOTOOLCHAIN
   - govulncheck
+  - httptest
   - ints
+  - keyval
+  - loadtest
   - localmodule
+  - logrus
+  - milli
+  - mkdocs
+  - multierr
+  - multierror
+  - Newf
+  - nolint
+  - omitempty
+  - pbkit
+  - popd
+  - pushd
+  - Reqs
   - recvcheck
-  - goccy
   - sarif
   - securego
+  - shellcheck
+  - sirupsen
+  - staticcheck
+  - stretchr
   - strconv
   - strs
   - tagalign
+  - testuser
+  - toplevel
   - vettool
+  - Wrapf
+  - zaptest
+  - zerolog
 ignoreWords: []
 import: []

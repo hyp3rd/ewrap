@@ -74,7 +74,7 @@ When creating errors, follow these guidelines for maximum effectiveness:
     err := ewrap.New("database error")
     ```
 
-2. **Include Relevant Context**: Add context that helps with debugging:
+1. **Include Relevant Context**: Add context that helps with debugging:
 
     ```go
     err := ewrap.New("failed to update user profile",
@@ -83,7 +83,7 @@ When creating errors, follow these guidelines for maximum effectiveness:
         WithMetadata("fields_updated", fields)
     ```
 
-3. **Use Appropriate Error Types**: Choose error types that match the situation:
+1. **Use Appropriate Error Types**: Choose error types that match the situation:
 
     ```go
     // For validation errors
@@ -95,7 +95,7 @@ When creating errors, follow these guidelines for maximum effectiveness:
         ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
     ```
 
-4. **Consider Recovery Options**: Include information that helps with recovery:
+1. **Consider Recovery Options**: Include information that helps with recovery:
 
     ```go
     err := ewrap.New("rate limit exceeded",
@@ -178,8 +178,8 @@ func processItems(items []string) []error {
 Error creation in ewrap is optimized for both CPU and memory usage. However, consider these performance tips:
 
 1. Reuse error types for common errors instead of creating new ones
-2. Only capture stack traces when necessary
-3. Be mindful of metadata quantity in high-throughput scenarios
-4. Use error pools for frequent error creation scenarios
+1. Only capture stack traces when necessary
+1. Be mindful of metadata quantity in high-throughput scenarios
+1. Use error pools for frequent error creation scenarios
 
 Remember: error creation should be reserved for exceptional cases. Don't use errors for normal control flow in your application.

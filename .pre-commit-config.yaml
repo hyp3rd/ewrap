@@ -3,7 +3,11 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      - id: check-merge-conflict
+      - id: check-json
+      - id: pretty-format-json
       - id: end-of-file-fixer
+      - id: mixed-line-ending
       - id: trailing-whitespace
       - id: mixed-line-ending
       - id: fix-byte-order-marker
@@ -12,7 +16,10 @@ repos:
       - id: debug-statements
       - id: check-yaml
         files: .*\.(yaml|yml)$
+        exclude: mkdocs.yml
         args: [--allow-multiple-documents]
+      - id: requirements-txt-fixer
+      - id: no-commit-to-branch
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.37.1
     hooks:

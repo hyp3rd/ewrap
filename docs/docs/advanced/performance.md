@@ -7,10 +7,10 @@ Understanding how to optimize error handling is crucial for maintaining high-per
 When we talk about performance in error handling, we need to consider several aspects:
 
 1. Memory allocation and garbage collection impact
-2. CPU overhead from stack trace capture
-3. Concurrency and contention in high-throughput scenarios
-4. The cost of error formatting and logging
-5. The impact of error wrapping chains
+1. CPU overhead from stack trace capture
+1. Concurrency and contention in high-throughput scenarios
+1. The cost of error formatting and logging
+1. The impact of error wrapping chains
 
 Let's explore how ewrap addresses each of these concerns and how you can optimize your error handling.
 
@@ -44,8 +44,8 @@ func processItems(items []Item) error {
 This approach is particularly effective because:
 
 1. It reduces garbage collection pressure
-2. It minimizes memory fragmentation
-3. It provides predictable memory usage patterns
+1. It minimizes memory fragmentation
+1. It provides predictable memory usage patterns
 
 ### Pre-allocation Strategies
 

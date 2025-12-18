@@ -214,7 +214,7 @@ When handling errors, consider implementing recovery strategies:
     }
     ```
 
-2. **Retry Patterns**:
+1. **Retry Patterns**:
 
 ```go
 func withRetry(operation func() error, maxAttempts int, delay time.Duration) error {
