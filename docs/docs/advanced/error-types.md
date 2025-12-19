@@ -7,9 +7,9 @@ Error types in ewrap provide a structured way to categorize and handle different
 Error types serve multiple purposes:
 
 1. They help categorize errors meaningfully
-2. They enable consistent error handling across your application
-3. They facilitate automated error processing and reporting
-4. They guide recovery strategies and user feedback
+1. They enable consistent error handling across your application
+1. They facilitate automated error processing and reporting
+1. They guide recovery strategies and user feedback
 
 Let's explore the built-in error types and learn how to use them effectively:
 

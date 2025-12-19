@@ -89,27 +89,27 @@ func processOrder(ctx context.Context, orderID string) error {
 
 To start using ewrap in your project, visit the [Installation](getting-started/installation.md) guide, followed by the [Quick Start](getting-started/quickstart.md) tutorial.
 
-## Why ewrap?
+## Why ewrap
 
 ewrap was created to address common challenges in modern Go error handling:
 
 ### Traditional Challenges Solved
 
 1. **Context Loss**: Traditional error handling often loses important context during error propagation
-2. **Performance Overhead**: Many error handling libraries introduce significant memory and CPU overhead
-3. **Memory Management**: Poor memory management in error handling leads to increased GC pressure
-4. **Inconsistent Logging**: Different parts of applications handle error logging differently
-5. **Missing Stack Traces**: Getting meaningful, filterable stack traces is challenging
-6. **Circuit Breaking**: Protecting systems from cascading failures requires complex implementation
+1. **Performance Overhead**: Many error handling libraries introduce significant memory and CPU overhead
+1. **Memory Management**: Poor memory management in error handling leads to increased GC pressure
+1. **Inconsistent Logging**: Different parts of applications handle error logging differently
+1. **Missing Stack Traces**: Getting meaningful, filterable stack traces is challenging
+1. **Circuit Breaking**: Protecting systems from cascading failures requires complex implementation
 
 ### Modern Go Challenges Addressed
 
 1. **Go 1.25+ Feature Integration**: Lack of libraries leveraging modern Go performance features
-2. **Observability Gaps**: Missing built-in support for metrics and tracing in error handling
-3. **Recovery Guidance**: Errors without actionable remediation suggestions
-4. **Type Safety**: Metadata handling without compile-time guarantees
-5. **Standard Library Integration**: Poor integration with `errors.Join` and modern error patterns
-6. **Serialization Complexity**: Difficulty in structured error export for monitoring systems
+1. **Observability Gaps**: Missing built-in support for metrics and tracing in error handling
+1. **Recovery Guidance**: Errors without actionable remediation suggestions
+1. **Type Safety**: Metadata handling without compile-time guarantees
+1. **Standard Library Integration**: Poor integration with `errors.Join` and modern error patterns
+1. **Serialization Complexity**: Difficulty in structured error export for monitoring systems
 
 ewrap provides solutions to all these challenges while maintaining backward compatibility and excellent performance characteristics.
 

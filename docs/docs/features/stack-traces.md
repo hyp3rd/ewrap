@@ -30,9 +30,9 @@ The captured stack trace includes:
 However, ewrap goes beyond simple capture by:
 
 1. Filtering out runtime implementation details
-2. Maintaining stack traces through error wrapping
-3. Providing formatted output options
-4. Offering programmatic access through iterators
+1. Maintaining stack traces through error wrapping
+1. Providing formatted output options
+1. Offering programmatic access through iterators
 
 ## Programmatic Stack Frame Access
 
@@ -210,9 +210,9 @@ func processOrder(orderID string) error {
 While stack traces are valuable for debugging, they do come with some overhead. ewrap optimizes this by:
 
 1. Using efficient stack capture mechanisms
-2. Implementing lazy formatting
-3. Caching stack trace strings
-4. Filtering irrelevant frames early
+1. Implementing lazy formatting
+1. Caching stack trace strings
+1. Filtering irrelevant frames early
 
 Here's how to work with stack traces efficiently:
 
@@ -276,7 +276,7 @@ func debugError(err error) {
     }
     ```
 
-2. **Combine with Logging**
+1. **Combine with Logging**
 
     Integrate stack traces with your logging system:
 
@@ -291,7 +291,7 @@ func debugError(err error) {
     }
     ```
 
-3. **Use in Development and Testing**
+1. **Use in Development and Testing**
 
     Stack traces are particularly valuable during development and testing:
 
@@ -320,7 +320,7 @@ func debugError(err error) {
         WithMetadata("operation", "user_update")
     ```
 
-2. **Missing Context**
+1. **Missing Context**
 
 Ensure you're capturing relevant context with your stack traces:
 

@@ -218,7 +218,7 @@ The pooled Error Group implementation is designed for high performance, but ther
     pool := ewrap.NewErrorGroupPool(4)  // If you typically expect 1-4 errors
     ```
 
-2. **Release Groups Properly**:
+1. **Release Groups Properly**:
 
     ```go
     func processWithErrors() error {
@@ -231,7 +231,7 @@ The pooled Error Group implementation is designed for high performance, but ther
     }
     ```
 
-3. **Reuse Pools**:
+1. **Reuse Pools**:
 
     ```go
     // Good: Create pool once and reuse
@@ -262,7 +262,7 @@ The pooled Error Group implementation is designed for high performance, but ther
     defer eg.Release()
     ```
 
-2. **Size Pools Appropriately**:
+1. **Size Pools Appropriately**:
     Choose pool sizes based on your expected error cases:
 
     ```go
@@ -270,27 +270,27 @@ The pooled Error Group implementation is designed for high performance, but ther
     pool := ewrap.NewErrorGroupPool(len(validationRules))
     ```
 
-3. **Handle Nested Operations**:
-When dealing with nested operations, manage Error Groups carefully:
+1. **Handle Nested Operations**:
+    When dealing with nested operations, manage Error Groups carefully:
 
-```go
-func processComplex() error {
-    outerPool := ewrap.NewErrorGroupPool(2)
-    outerGroup := outerPool.Get()
-    defer outerGroup.Release()
+    ```go
+    func processComplex() error {
+        outerPool := ewrap.NewErrorGroupPool(2)
+        outerGroup := outerPool.Get()
+        defer outerGroup.Release()
 
-    for _, item := range items {
-        innerPool := ewrap.NewErrorGroupPool(4)
-        innerGroup := innerPool.Get()
+        for _, item := range items {
+            innerPool := ewrap.NewErrorGroupPool(4)
+            innerGroup := innerPool.Get()
 
-        // Process with inner group...
+            // Process with inner group...
 
-        if err := innerGroup.Error(); err != nil {
-            outerGroup.Add(err)
+            if err := innerGroup.Error(); err != nil {
+                outerGroup.Add(err)
+            }
+            innerGroup.Release()
         }
-        innerGroup.Release()
-    }
 
-    return outerGroup.Error()
-}
-```
+        return outerGroup.Error()
+    }
+    ```

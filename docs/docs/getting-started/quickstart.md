@@ -75,20 +75,20 @@ if cb.CanExecute() {
 Now that you understand the basics, you can:
 
 1. Learn about [Error Types](../features/error-types.md)
-2. Explore [Logging Integration](../features/logging.md)
-3. Study [Advanced Usage](../advanced/performance.md)
-4. Check out complete [Examples](../examples/basic.md)
+1. Explore [Logging Integration](../features/logging.md)
+1. Study [Advanced Usage](../advanced/performance.md)
+1. Check out complete [Examples](../examples/basic.md)
 
 ## Best Practices
 
 Here are some best practices to follow when using ewrap:
 
 1. Always provide meaningful error messages
-2. Use appropriate error types and severity levels
-3. Release error groups back to their pools
-4. Configure circuit breakers based on your system's characteristics
-5. Implement proper logging integration
-6. Use metadata to add relevant debugging information
+1. Use appropriate error types and severity levels
+1. Release error groups back to their pools
+1. Configure circuit breakers based on your system's characteristics
+1. Implement proper logging integration
+1. Use metadata to add relevant debugging information
 
 ## Common Patterns
 

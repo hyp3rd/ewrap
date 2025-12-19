@@ -7,8 +7,8 @@ The Circuit Breaker pattern is like a safety switch in an electrical system - it
 Imagine you're calling a database service. Without a circuit breaker, if the database becomes slow or unresponsive, your application might:
 
 1. Keep trying and failing
-2. Accumulate resource-consuming connections
-3. Eventually crash or become unresponsive itself
+1. Accumulate resource-consuming connections
+1. Eventually crash or become unresponsive itself
 
 A circuit breaker prevents this by monitoring failures and automatically stopping attempts when a threshold is reached, giving the system time to recover.
 

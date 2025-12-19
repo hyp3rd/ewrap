@@ -7,10 +7,10 @@ The ewrap package provides a sophisticated error handling solution for Go applic
 ewrap is built on several key principles:
 
 1. **Rich Context**: Errors should carry enough information to understand what went wrong, where, and why
-2. **Performance**: Error handling shouldn't become a bottleneck in your application
-3. **Developer Experience**: Clear, consistent patterns that make error handling both powerful and approachable
-4. **Flexibility**: Easy integration with existing systems and adaptable to different needs
-5. **Production Readiness**: Built-in support for logging, monitoring, and debugging
+1. **Performance**: Error handling shouldn't become a bottleneck in your application
+1. **Developer Experience**: Clear, consistent patterns that make error handling both powerful and approachable
+1. **Flexibility**: Easy integration with existing systems and adaptable to different needs
+1. **Production Readiness**: Built-in support for logging, monitoring, and debugging
 
 ## Component Architecture
 
@@ -159,9 +159,9 @@ func processItems(items []Item) error {
 The package includes several optimizations:
 
 1. **Memory Pooling**: Reduces allocation overhead
-2. **Lock-Free Operations**: Where possible, for better concurrency
-3. **Efficient Stack Traces**: Captures only necessary frames
-4. **Lazy Formatting**: Defers expensive string operations
+1. **Lock-Free Operations**: Where possible, for better concurrency
+1. **Efficient Stack Traces**: Captures only necessary frames
+1. **Lazy Formatting**: Defers expensive string operations
 
 ## Best Practices
 
@@ -175,25 +175,25 @@ To get the most out of ewrap:
    ErrorTypeNetwork     // For network operations
    ```
 
-2. **Leverage Context**: Add relevant context to errors:
+1. **Leverage Context**: Add relevant context to errors:
 
    ```go
    ewrap.WithContext(ctx, errorType, severity)
    ```
 
-3. **Implement Proper Logging**: Use structured logging for better debugging:
+1. **Implement Proper Logging**: Use structured logging for better debugging:
 
    ```go
    ewrap.WithLogger(logger)
    ```
 
-4. **Use Error Groups Efficiently**: Pool error groups for better performance:
+1. **Use Error Groups Efficiently**: Pool error groups for better performance:
 
    ```go
    pool := ewrap.NewErrorGroupPool(size)
    ```
 
-5. **Handle Circuit Breaking**: Protect your system from cascading failures:
+1. **Handle Circuit Breaking**: Protect your system from cascading failures:
 
    ```go
    breaker := ewrap.NewCircuitBreaker(name, maxFailures, timeout)
