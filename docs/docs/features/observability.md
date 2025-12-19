@@ -341,20 +341,20 @@ func (p *PrometheusObserver) OnCircuitBreakerStateChange(name string, from, to C
 ### Performance Considerations
 
 1. **Lightweight Observers**: Keep observer implementations fast to avoid impacting error handling performance
-2. **Async Processing**: Use goroutines for expensive operations in observers
-3. **Buffered Channels**: Use buffered channels for high-throughput scenarios
+1. **Async Processing**: Use goroutines for expensive operations in observers
+1. **Buffered Channels**: Use buffered channels for high-throughput scenarios
 
 ### Monitoring Strategy
 
 1. **Error Rate Monitoring**: Track error rates by type and severity
-2. **Circuit Breaker Health**: Monitor state transitions and success rates
-3. **Recovery Effectiveness**: Analyze which recovery suggestions are most common
-4. **Performance Impact**: Monitor the overhead of observability features
+1. **Circuit Breaker Health**: Monitor state transitions and success rates
+1. **Recovery Effectiveness**: Analyze which recovery suggestions are most common
+1. **Performance Impact**: Monitor the overhead of observability features
 
 ### Alert Configuration
 
 1. **Error Spikes**: Alert on sudden increases in error rates
-2. **Circuit Breaker Openings**: Immediate alerts when services become unavailable
-3. **Recovery Pattern Changes**: Notify when new types of errors appear frequently
+1. **Circuit Breaker Openings**: Immediate alerts when services become unavailable
+1. **Recovery Pattern Changes**: Notify when new types of errors appear frequently
 
 The observability features in ewrap provide deep insights into your application's error patterns and system health, enabling proactive monitoring and faster incident response.

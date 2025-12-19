@@ -405,7 +405,7 @@ ewrap.RegisterGlobalObserver(myObserver)
    git clone https://github.com/hyp3rd/ewrap.git
    ```
 
-2. Install VS Code Extensions Recommended (optional):
+1. Install VS Code Extensions Recommended (optional):
 
    ```json
    {
@@ -424,15 +424,15 @@ ewrap.RegisterGlobalObserver(myObserver)
    ```
 
    1. Install [**Golang**](https://go.dev/dl).
-   2. Install [**GitVersion**](https://github.com/GitTools/GitVersion).
-   3. Install [**Make**](https://www.gnu.org/software/make/), follow the procedure for your OS.
-   4. **Set up the toolchain:**
+   1. Install [**GitVersion**](https://github.com/GitTools/GitVersion).
+   1. Install [**Make**](https://www.gnu.org/software/make/), follow the procedure for your OS.
+   1. **Set up the toolchain:**
 
       ```bash
       make prepare-toolchain
       ```
 
-   5. Initialize `pre-commit` (strongly recommended to create a virtual env, using for instance [PyEnv](https://github.com/pyenv/pyenv)) and its hooks:
+   1. Initialize `pre-commit` (strongly recommended to create a virtual env, using for instance [PyEnv](https://github.com/pyenv/pyenv)) and its hooks:
 
    ```bash
       pip install pre-commit
@@ -477,10 +477,10 @@ ewrap.RegisterGlobalObserver(myObserver)
 ## Contributing
 
 1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+1. Create your feature branch
+1. Commit your changes
+1. Push to the branch
+1. Create a Pull Request
 
 Refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
 
