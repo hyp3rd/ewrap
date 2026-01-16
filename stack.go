@@ -10,11 +10,11 @@ type StackFrame struct {
 	// Function is the fully qualified function name
 	Function string `json:"function" yaml:"function"`
 	// File is the source file path
-	File string `json:"file"     yaml:"file"`
+	File string `json:"file" yaml:"file"`
 	// Line is the line number in the source file
-	Line int `json:"line"     yaml:"line"`
+	Line int `json:"line" yaml:"line"`
 	// PC is the program counter for this frame
-	PC uintptr `json:"pc"       yaml:"pc"`
+	PC uintptr `json:"pc" yaml:"pc"`
 }
 
 // StackTrace represents a collection of stack frames.
