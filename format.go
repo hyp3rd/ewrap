@@ -13,19 +13,19 @@ import (
 // serialized to various formats like JSON and YAML.
 type ErrorOutput struct {
 	// Message contains the main error message
-	Message string `json:"message"            yaml:"message"`
+	Message string `json:"message" yaml:"message"`
 	// Timestamp indicates when the error occurred
-	Timestamp string `json:"timestamp"          yaml:"timestamp"`
+	Timestamp string `json:"timestamp" yaml:"timestamp"`
 	// Type categorizes the error
-	Type string `json:"type"               yaml:"type"`
+	Type string `json:"type" yaml:"type"`
 	// Severity indicates the error's impact level
-	Severity string `json:"severity"           yaml:"severity"`
+	Severity string `json:"severity" yaml:"severity"`
 	// Stack contains the error stack trace
-	Stack string `json:"stack"              yaml:"stack"`
+	Stack string `json:"stack" yaml:"stack"`
 	// Cause contains the underlying error if any
-	Cause *ErrorOutput `json:"cause,omitempty"    yaml:"cause,omitempty"`
+	Cause *ErrorOutput `json:"cause,omitempty" yaml:"cause,omitempty"`
 	// Context contains additional error context
-	Context map[string]any `json:"context,omitempty"  yaml:"context,omitempty"`
+	Context map[string]any `json:"context,omitempty" yaml:"context,omitempty"`
 	// Metadata contains user-defined metadata
 	Metadata map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 	// Recovery provides guidance on resolving the error
