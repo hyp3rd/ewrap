@@ -1,5 +1,7 @@
 ---
 name: gitleaks
+permissions:
+    contents: read
 on:
     pull_request:
     push:
