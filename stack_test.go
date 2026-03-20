@@ -248,7 +248,7 @@ func TestEmptyErrorGroupSerialization(t *testing.T) {
 
 func BenchmarkErrorGroupSerialization(b *testing.B) {
 	eg := NewErrorGroup()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		eg.Add(New("error").WithMetadata("index", i))
 	}
 
