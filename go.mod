@@ -7,7 +7,7 @@ require (
 	emperror.dev/errors v0.8.1
 	github.com/goccy/go-json v0.10.6
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/rs/zerolog v1.34.0
+	github.com/rs/zerolog v1.35.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/multierr v1.11.0
