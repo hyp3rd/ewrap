@@ -1,6 +1,6 @@
 module github.com/hyp3rd/ewrap
 
-go 1.26.1
+go 1.26.2
 
 require (
 	emperror.dev/emperror v0.33.0
@@ -19,9 +19,9 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-isatty v0.0.21 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
 )
