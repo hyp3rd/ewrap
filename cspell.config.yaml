@@ -33,6 +33,7 @@ dictionaries:
   - custom-dictionary
 words:
   - Atoi
+  - benchmem
   - codacy
   - daixiang
   - eamodio
@@ -52,10 +53,12 @@ words:
   - goccy
   - gofiber
   - GOFILES
+  - gofumpt
   - golines
   - gomod
-  - goroutines
   - GOPATH
+  - goroutines
+  - gosec
   - GOTOOLCHAIN
   - govulncheck
   - httptest
@@ -66,6 +69,7 @@ words:
   - logrus
   - milli
   - mkdocs
+  - monkeypatching
   - multierr
   - multierror
   - Newf
@@ -74,15 +78,15 @@ words:
   - pbkit
   - popd
   - pushd
-  - Reqs
   - recvcheck
+  - Reqs
   - sarif
   - securego
   - shellcheck
   - sirupsen
   - staticcheck
-  - stretchr
   - strconv
+  - stretchr
   - strs
   - tagalign
   - testuser

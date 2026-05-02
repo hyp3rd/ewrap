@@ -3,6 +3,7 @@ package ewrap
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -42,7 +43,6 @@ func WithTimestampFormat(format string) FormatOption {
 			return
 		}
 
-		// Attempt to parse existing timestamp and reformat
 		t, err := time.Parse(time.RFC3339, eo.Timestamp)
 		if err == nil {
 			eo.Timestamp = t.Format(format)
@@ -62,91 +62,72 @@ func WithStackTrace(include bool) FormatOption {
 // toErrorOutput converts an Error to ErrorOutput format.
 func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
 
-	// Extract error context if available
-	var (
-		ctx        *ErrorContext
-		contextMap map[string]any
-		recovery   *RecoverySuggestion
-	)
+	metadataCopy := make(map[string]any, len(e.metadata))
+	maps.Copy(metadataCopy, e.metadata)
 
-	if rawCtx, ok := e.metadata["error_context"]; ok {
-		if ctx, ok = rawCtx.(*ErrorContext); ok {
-			contextMap = map[string]any{
-				"request_id":  ctx.RequestID,
-				"user":        ctx.User,
-				"component":   ctx.Component,
-				"operation":   ctx.Operation,
-				"file":        ctx.File,
-				"line":        ctx.Line,
-				"environment": ctx.Environment,
-			}
-		}
-	}
+	e.mu.RUnlock()
 
-	if rawRec, ok := e.metadata["recovery_suggestion"]; ok {
-		recovery, ok = rawRec.(*RecoverySuggestion)
-		if !ok {
-			recovery = nil
-		}
-	}
-
-	// Create base output structure
 	output := &ErrorOutput{
 		Message:   e.msg,
 		Timestamp: time.Now().Format(time.RFC3339),
-		Type:      "unknown",
-		Severity:  "error",
+		Type:      typeUnknownStr,
+		Severity:  severityErrorStr,
 		Stack:     e.Stack(),
-		Context:   contextMap,
-		Metadata:  make(map[string]any),
-		Recovery:  recovery,
+		Metadata:  metadataCopy,
+		Recovery:  e.recovery,
 	}
 
-	// Copy metadata excluding internal keys
-	copyMetadata(e, output)
-
-	// Set error type and severity if available
-	if ctx != nil {
+	if ctx := e.errorContext; ctx != nil {
 		output.Type = ctx.Type.String()
 		output.Severity = ctx.Severity.String()
+		output.Context = map[string]any{
+			"request_id":  ctx.RequestID,
+			"user":        ctx.User,
+			"component":   ctx.Component,
+			"operation":   ctx.Operation,
+			"file":        ctx.File,
+			"line":        ctx.Line,
+			"environment": ctx.Environment,
+		}
 	}
 
-	// Handle wrapped errors
 	if e.cause != nil {
 		var wrappedErr *Error
 		if errors.As(e.cause, &wrappedErr) {
 			output.Cause = wrappedErr.toErrorOutput(opts...)
 		} else {
-			output.Cause = &ErrorOutput{
-				Message:  e.cause.Error(),
-				Type:     "unknown",
-				Severity: "error",
-			}
+			output.Cause = standardErrorOutput(e.cause)
 		}
 	}
 
-	// Apply formatting options
-	applyFormatOptions(output, opts...)
+	for _, opt := range opts {
+		opt(output)
+	}
 
 	return output
 }
 
-// applyFormatOptions applies the given formatting options to the ErrorOutput.
-func applyFormatOptions(output *ErrorOutput, opts ...FormatOption) {
-	for _, opt := range opts {
-		opt(output)
+// standardErrorOutput renders a non-ewrap error and walks any further chain
+// via errors.Unwrap so JSON/YAML output preserves the full cause history.
+func standardErrorOutput(err error) *ErrorOutput {
+	out := &ErrorOutput{
+		Message:  err.Error(),
+		Type:     typeUnknownStr,
+		Severity: severityErrorStr,
 	}
-}
 
-// copyMetadata copies user-defined metadata from the Error to the ErrorOutput.
-func copyMetadata(e *Error, output *ErrorOutput) {
-	for k, v := range e.metadata {
-		if k != "error_context" && k != "recovery_suggestion" {
-			output.Metadata[k] = v
+	cause := errors.Unwrap(err)
+	if cause != nil {
+		var wrappedErr *Error
+		if errors.As(cause, &wrappedErr) {
+			out.Cause = wrappedErr.toErrorOutput()
+		} else {
+			out.Cause = standardErrorOutput(cause)
 		}
 	}
+
+	return out
 }
 
 // ToJSON converts the error to a JSON string.

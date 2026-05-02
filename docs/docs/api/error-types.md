@@ -1,244 +1,226 @@
 # Error Types and Severity
 
-Understanding error types and severity levels is fundamental to using ewrap effectively. This guide explains the built-in error categorization system and how to leverage it for better error handling.
+ewrap ships small enums for classifying errors. Both have a `String()`
+method whose output is what shows up in `ErrorOutput.Type`/`Severity`,
+JSON, YAML, and `slog` records — pin yourself to these values rather than
+re-stringifying.
 
-## Error Types Explained
-
-Error types in ewrap are more than just labels - they represent distinct categories of failures that can occur in your application. Each type suggests different handling strategies and helps maintain consistency in how errors are processed throughout your system.
-
-### Built-in Error Types
+## `ErrorType`
 
 ```go
+type ErrorType int
+
 const (
-    ErrorTypeUnknown ErrorType = iota
-    ErrorTypeValidation
-    ErrorTypeNotFound
-    ErrorTypePermission
-    ErrorTypeDatabase
-    ErrorTypeNetwork
-    ErrorTypeConfiguration
-    ErrorTypeInternal
-    ErrorTypeExternal
+    ErrorTypeUnknown        // -> "unknown"
+    ErrorTypeValidation     // -> "validation"
+    ErrorTypeNotFound       // -> "not_found"
+    ErrorTypePermission     // -> "permission"
+    ErrorTypeDatabase       // -> "database"
+    ErrorTypeNetwork        // -> "network"
+    ErrorTypeConfiguration  // -> "configuration"
+    ErrorTypeInternal       // -> "internal"
+    ErrorTypeExternal       // -> "external"
 )
 ```
 
-Let's explore each error type and its intended use:
+| Type | When to use |
+| --- | --- |
+| `Unknown` | Unclassified — default if you don't supply `WithContext`. |
+| `Validation` | Caller-supplied input failed checks. Not retryable by default. |
+| `NotFound` | Resource doesn't exist. Maps cleanly to HTTP 404. |
+| `Permission` | Authentication / authorisation failures. Maps to 401/403. |
+| `Database` | Storage layer failure (driver, connection pool, query). |
+| `Network` | Connectivity, DNS, TLS handshake failures. |
+| `Configuration` | Misconfiguration detected at startup or runtime. |
+| `Internal` | Bug or invariant violation in your own code. |
+| `External` | Third-party service failure beyond `Network` (e.g. rate-limit, 5xx). |
 
-### ErrorTypeUnknown
-
-Used when an error doesn't clearly fit into other categories. While it's available as a fallback, you should try to use more specific error types when possible.
+### Setting
 
 ```go
-err := ewrap.New("unexpected error occurred",
-    ewrap.WithContext(ctx, ErrorTypeUnknown, SeverityError))
+ewrap.New("invalid email",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityWarning))
 ```
 
-### ErrorTypeValidation
-
-For errors related to input validation, data formatting, or business rule violations. These errors typically indicate that the request or data being processed doesn't meet required criteria.
+### Reading
 
 ```go
-func validateUser(user User) error {
-    if user.Age < 18 {
-        return ewrap.New("user must be 18 or older",
-            ewrap.WithContext(ctx, ErrorTypeValidation, SeverityError)).
-            WithMetadata("provided_age", user.Age).
-            WithMetadata("minimum_age", 18)
+if ec := err.GetErrorContext(); ec != nil {
+    switch ec.Type {
+    case ewrap.ErrorTypeValidation:
+        // 422 / 400
+    case ewrap.ErrorTypeNotFound:
+        // 404
     }
-    return nil
 }
 ```
 
-### ErrorTypeNotFound
+You can also branch on the canonical string form (`ec.Type.String()`),
+useful in dashboards or log filters.
 
-Indicates that a requested resource doesn't exist. This is particularly useful in API endpoints and database operations.
+### Default retry semantics
 
-```go
-func getUser(ctx context.Context, userID string) (*User, error) {
-    user, err := db.FindUser(userID)
-    if err == sql.ErrNoRows {
-        return nil, ewrap.New("user not found",
-            ewrap.WithContext(ctx, ErrorTypeNotFound, SeverityWarning)).
-            WithMetadata("user_id", userID)
-    }
-    return user, err
-}
-```
+The default `WithRetry` predicate (`defaultShouldRetry`) treats
+`ErrorTypeValidation` as **non-retryable** and everything else as
+retryable. Override with `WithRetryShould` for finer control.
 
-### ErrorTypePermission
-
-For authorization and authentication failures. These errors indicate that the operation failed due to insufficient permissions or invalid credentials.
+## `Severity`
 
 ```go
-func validateAccess(ctx context.Context, userID string, resource string) error {
-    if !hasPermission(userID, resource) {
-        return ewrap.New("access denied",
-            ewrap.WithContext(ctx, ErrorTypePermission, SeverityWarning)).
-            WithMetadata("user_id", userID).
-            WithMetadata("resource", resource).
-            WithMetadata("required_role", "admin")
-    }
-    return nil
-}
-```
+type Severity int
 
-### ErrorTypeDatabase
-
-Used for database-related errors, including connection issues, query failures, and transaction problems.
-
-```go
-func saveUserData(ctx context.Context, user User) error {
-    if err := db.Insert(user); err != nil {
-        return ewrap.Wrap(err, "failed to save user data",
-            ewrap.WithContext(ctx, ErrorTypeDatabase, SeverityCritical)).
-            WithMetadata("table", "users").
-            WithMetadata("operation", "insert")
-    }
-    return nil
-}
-```
-
-### ErrorTypeNetwork
-
-For network-related failures, including API calls, service communication, and connectivity issues.
-
-```go
-func callExternalAPI(ctx context.Context, endpoint string) error {
-    resp, err := http.Get(endpoint)
-    if err != nil {
-        return ewrap.Wrap(err, "API call failed",
-            ewrap.WithContext(ctx, ErrorTypeNetwork, SeverityError)).
-            WithMetadata("endpoint", endpoint).
-            WithMetadata("timeout_seconds", 30)
-    }
-    return nil
-}
-```
-
-### ErrorTypeConfiguration
-
-Used when errors occur due to misconfiguration or invalid settings.
-
-```go
-func loadConfig(ctx context.Context, path string) (*Config, error) {
-    cfg, err := parseConfig(path)
-    if err != nil {
-        return nil, ewrap.Wrap(err, "invalid configuration",
-            ewrap.WithContext(ctx, ErrorTypeConfiguration, SeverityCritical)).
-            WithMetadata("config_path", path).
-            WithMetadata("invalid_fields", getInvalidFields(err))
-    }
-    return cfg, nil
-}
-```
-
-### ErrorTypeInternal
-
-For internal system errors that aren't caused by external factors or user input.
-
-```go
-func processData(ctx context.Context, data []byte) error {
-    if err := internalProcess(data); err != nil {
-        return ewrap.Wrap(err, "internal processing failed",
-            ewrap.WithContext(ctx, ErrorTypeInternal, SeverityCritical)).
-            WithMetadata("process_id", getCurrentProcessID()).
-            WithMetadata("memory_usage", getMemoryUsage())
-    }
-    return nil
-}
-```
-
-### ErrorTypeExternal
-
-For errors originating from external services or systems.
-
-```go
-func callPaymentProvider(ctx context.Context, payment Payment) error {
-    result, err := paymentProvider.Process(payment)
-    if err != nil {
-        return ewrap.Wrap(err, "payment processing failed",
-            ewrap.WithContext(ctx, ErrorTypeExternal, SeverityCritical)).
-            WithMetadata("provider", "stripe").
-            WithMetadata("payment_id", payment.ID).
-            WithMetadata("status_code", result.StatusCode)
-    }
-    return nil
-}
-```
-
-## Severity Levels
-
-Severity levels help indicate the impact and urgency of an error. ewrap provides four severity levels:
-
-```go
 const (
-    SeverityInfo Severity = iota
-    SeverityWarning
-    SeverityError
-    SeverityCritical
+    SeverityInfo      // -> "info"
+    SeverityWarning   // -> "warning"
+    SeverityError     // -> "error"
+    SeverityCritical  // -> "critical"
 )
 ```
 
-### Using Severity Levels Effectively
+| Severity | Typical use |
+| --- | --- |
+| `Info` | Notable but not failed (e.g. degraded mode). |
+| `Warning` | Recovered automatically; likely worth investigating. |
+| `Error` | Operation failed; user-facing or actionable. |
+| `Critical` | System-impacting; page someone. |
 
-The choice of severity level should reflect the impact of the error on your system:
-
-### SeverityInfo
-
-For informational messages that don't indicate a problem but might be useful for debugging or monitoring.
+### Setting severity
 
 ```go
-func auditAction(ctx context.Context, action string) error {
-    return ewrap.New("action audited",
-        ewrap.WithContext(ctx, ErrorTypeInternal, SeverityInfo)).
-        WithMetadata("action", action).
-        WithMetadata("timestamp", time.Now())
+ewrap.New("DB unreachable",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
+```
+
+### Reading severity
+
+```go
+if ec := err.GetErrorContext(); ec != nil && ec.Severity >= ewrap.SeverityError {
+    pageOncall(err)
 }
 ```
 
-### SeverityWarning
-
-For issues that don't prevent the system from functioning but require attention.
+## `RecoverySuggestion`
 
 ```go
-func checkDiskSpace(ctx context.Context) error {
-    if usage := getDiskUsage(); usage > 80 {
-        return ewrap.New("high disk usage detected",
-            ewrap.WithContext(ctx, ErrorTypeInternal, SeverityWarning)).
-            WithMetadata("usage_percentage", usage).
-            WithMetadata("threshold", 80)
-    }
-    return nil
+type RecoverySuggestion struct {
+    Message       string   `json:"message"       yaml:"message"`
+    Actions       []string `json:"actions"       yaml:"actions"`
+    Documentation string   `json:"documentation" yaml:"documentation"`
 }
 ```
 
-### SeverityError
-
-For significant issues that prevent a specific operation from completing successfully.
+A typed payload describing what an operator should do about the error.
+Attached via `WithRecoverySuggestion`, read via `(*Error).Recovery()`,
+and emitted by `(*Error).Log` as `recovery_message`, `recovery_actions`,
+`recovery_documentation` fields.
 
 ```go
-func processOrder(ctx context.Context, order Order) error {
-    if err := validateOrder(order); err != nil {
-        return ewrap.Wrap(err, "order validation failed",
-            ewrap.WithContext(ctx, ErrorTypeValidation, SeverityError)).
-            WithMetadata("order_id", order.ID)
-    }
-    return nil
+ewrap.New("payment provider timeout",
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message:       "Inspect provider's queue and retry after backoff.",
+        Actions:       []string{"check status page", "retry with backoff"},
+        Documentation: "https://runbooks.example.com/payments/timeout",
+    }))
+```
+
+## `ErrorContext`
+
+```go
+type ErrorContext struct {
+    Timestamp   time.Time
+    Type        ErrorType
+    Severity    Severity
+    Operation   string
+    Component   string
+    RequestID   string
+    User        string
+    Environment string
+    Version     string
+    File        string
+    Line        int
+    Data        map[string]any
 }
 ```
 
-### SeverityCritical
+Built by the `WithContext(ctx, type, severity)` option, which reads
+`request_id`, `user`, `operation`, and `component` out of the
+`context.Context` if present. `File`/`Line` are captured automatically
+via `runtime.Caller`. `Environment` falls back to `APP_ENV` or
+`"development"`.
 
-For severe issues that might affect system stability or require immediate attention.
+You can also build one explicitly and pass it via the method form:
 
 ```go
-func initializeDatabase(ctx context.Context) error {
-    if err := db.Connect(); err != nil {
-        return ewrap.Wrap(err, "database initialization failed",
-            ewrap.WithContext(ctx, ErrorTypeDatabase, SeverityCritical)).
-            WithMetadata("retry_count", 3).
-            WithMetadata("last_error", err.Error())
-    }
-    return nil
+err.WithContext(&ewrap.ErrorContext{
+    Type:      ewrap.ErrorTypeNetwork,
+    Severity:  ewrap.SeverityError,
+    RequestID: "req-123",
+    Component: "billing",
+})
+```
+
+## `RetryInfo`
+
+```go
+type RetryInfo struct {
+    MaxAttempts    int
+    CurrentAttempt int
+    Delay          time.Duration
+    LastAttempt    time.Time
+    ShouldRetry    func(error) bool
 }
 ```
+
+Attached via `WithRetry`, read via `(*Error).Retry()`, driven via
+`(*Error).CanRetry()` and `(*Error).IncrementRetry()`.
+
+The `ShouldRetry` predicate is consulted by `CanRetry` along with
+`CurrentAttempt < MaxAttempts`. The default is
+`defaultShouldRetry` (refuses validation errors); override with
+`WithRetryShould`.
+
+## `StackFrame`
+
+```go
+type StackFrame struct {
+    Function string  `json:"function" yaml:"function"`
+    File     string  `json:"file"     yaml:"file"`
+    Line     int     `json:"line"     yaml:"line"`
+    PC       uintptr `json:"pc"       yaml:"pc"`
+}
+```
+
+A single decoded stack frame. Returned in slices by
+`(*Error).GetStackFrames()` and via `*StackIterator` from
+`GetStackIterator()`.
+
+## `StackTrace`
+
+```go
+type StackTrace []StackFrame
+```
+
+A slice alias, mostly used for documentation purposes.
+
+## `ErrorOutput`
+
+The schema for `(*Error).ToJSON` / `ToYAML`. See
+[Serialization](../features/serialization.md) for the full layout.
+
+## `SerializableError` and `ErrorGroupSerialization`
+
+The schemas for `(*ErrorGroup).ToJSON` / `ToYAML`. Same source.
+
+## `breaker.State`
+
+```go
+type State int
+
+const (
+    Closed   // "closed"
+    Open     // "open"
+    HalfOpen // "half-open"
+)
+```
+
+See [Circuit Breaker](../features/circuit-breaker.md) for behaviour.

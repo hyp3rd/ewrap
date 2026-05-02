@@ -14,7 +14,7 @@ run:
   issues-exit-code: 2
   # Include test files or not.
   # Default: true
-  tests: false
+  tests: true
   # List of build tags, all linters use it.
   # Default: []
   # build-tags:
@@ -50,17 +50,15 @@ linters:
   default: all
   enable:
     - wsl_v5
+    - gomodguard_v2
   disable:
     - depguard
-    - embeddedstructfieldcheck
     - exhaustruct
-    - gomoddirectives
+    - gomodguard
     - ireturn
-    - lll
+    - nolintlint
     - nonamedreturns
-    - recvcheck
-    - tagliatelle
-    - tagalign
+    - testpackage
     - wsl
 
   settings:
@@ -73,10 +71,10 @@ linters:
       # Such cases aren't reported by default.
       # Default: false
       check-type-assertions: true
-      # report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`.
-      # Such cases aren't reported by default.
-      # Default: false
-      check-blank: true
+      # Reporting blank-identifier assignments is overly strict — discarding to
+      # `_` is the documented idiom for "intentional ignore". We still catch
+      # truly unchecked returns (no assignment at all) via the default rules.
+      check-blank: false
       # To disable the errcheck built-in exclude list.
       # See `-excludeonly` option in https://github.com/kisielk/errcheck#excluding-functions for details.
       # Default: false
@@ -86,6 +84,7 @@ linters:
       exclude-functions:
         - fmt.Fprintf
         - fmt.Fprintln
+        - fmt.Fprint
     funlen:
       lines: 100
 
@@ -137,20 +136,20 @@ linters:
           disabled: false
           arguments:
             - max-lit-count: "3"
-              allow-strs: '"","-"'
+              allow-strs: "\"\",\"-\""
               allow-ints: "-1,0,1,2,10,1024,0o600,0o644,0o700,0o755,0666,0755"
               allow-floats: "0.0,1.0"
 
         - name: cognitive-complexity
           severity: warning
           disabled: false
-          arguments: [10]
+          arguments: [ 10 ]
 
         - name: cyclomatic
-          arguments: [15]
+          arguments: [ 15 ]
 
         - name: max-public-structs
-          arguments: [10]
+          arguments: [ 10 ]
 
         - name: nested-structs
           disabled: true
@@ -159,7 +158,7 @@ linters:
           disabled: true
 
         - name: line-length-limit
-          arguments: [140]
+          arguments: [ 140 ]
 
         - name: var-naming
           disabled: true
@@ -167,14 +166,43 @@ linters:
         - name: package-comments
           severity: warning
           disabled: false
-          exclude: [""]
+          exclude: [ "" ]
+
+    tagliatelle:
+      # Checks the struct tag name case.
+      case:
+        # Defines the association between tag name and case.
+        # Any struct tag name can be used.
+        # Supported string cases:
+        # - `camel`
+        # - `pascal`
+        # - `kebab`
+        # - `snake`
+        # - `upperSnake`
+        # - `goCamel`
+        # - `goPascal`
+        # - `goKebab`
+        # - `goSnake`
+        # - `upper`
+        # - `lower`
+        # - `header`
+        rules:
+          json: snake
+          yaml: snake
+          # xml: camel
+          # toml: camel
+          # bson: camel
+          # avro: snake
+          # mapstructure: kebab
+          # env: upperSnake
+          # envconfig: upperSnake
+          # whatever: snake
 
     wrapcheck:
       # An array of strings that specify globs of packages to ignore.
       # Default: []
       ignore-package-globs:
         - github.com/hyp3rd/*
-        - github.com/gofiber/fiber/*
 
     varnamelen:
       # The longest distance, in source lines, that is being considered a "small scope".

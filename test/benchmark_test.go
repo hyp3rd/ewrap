@@ -8,14 +8,25 @@ import (
 	"time"
 
 	"github.com/hyp3rd/ewrap"
+	"github.com/hyp3rd/ewrap/breaker"
 )
+
+const (
+	benchMetadataKeys     = 5
+	benchMetadataIntValue = 42
+	benchAddErrorCount    = 10
+	benchBreakerFailLimit = 5
+	benchBreakerLargeMax  = 1000
+)
+
+var errBaseBench = errors.New("base error")
 
 // mockLogger implements a minimal logger for benchmarking.
 type mockLogger struct{}
 
-func (m *mockLogger) Error(msg string, keysAndValues ...any) {}
-func (m *mockLogger) Debug(msg string, keysAndValues ...any) {}
-func (m *mockLogger) Info(msg string, keysAndValues ...any)  {}
+func (*mockLogger) Error(string, ...any) {}
+func (*mockLogger) Debug(string, ...any) {}
+func (*mockLogger) Info(string, ...any)  {}
 
 // BenchmarkNew measures the performance of creating new errors.
 func BenchmarkNew(b *testing.B) {
@@ -42,7 +53,7 @@ func BenchmarkNew(b *testing.B) {
 	b.Run("WithLogger", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = ewrap.New("error with logger",
 				ewrap.WithLogger(logger))
 		}
@@ -56,7 +67,7 @@ func BenchmarkNew(b *testing.B) {
 				ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError),
 				ewrap.WithLogger(logger)).
 				WithMetadata("key1", "value1").
-				WithMetadata("key2", 42)
+				WithMetadata("key2", benchMetadataIntValue)
 		}
 	})
 }
@@ -65,21 +76,20 @@ func BenchmarkNew(b *testing.B) {
 func BenchmarkWrap(b *testing.B) {
 	logger := &mockLogger{}
 	ctx := context.Background()
-	baseErr := errors.New("base error")
 
 	b.Run("Simple", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
-			_ = ewrap.Wrap(baseErr, "wrapped error")
+		for range b.N {
+			_ = ewrap.Wrap(errBaseBench, "wrapped error")
 		}
 	})
 
 	b.Run("NestedWraps", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
-			err1 := ewrap.Wrap(baseErr, "level 1")
+		for range b.N {
+			err1 := ewrap.Wrap(errBaseBench, "level 1")
 			err2 := ewrap.Wrap(err1, "level 2")
 			_ = ewrap.Wrap(err2, "level 3")
 		}
@@ -88,8 +98,8 @@ func BenchmarkWrap(b *testing.B) {
 	b.Run("WithContext", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
-			_ = ewrap.Wrap(baseErr, "wrapped with context",
+		for range b.N {
+			_ = ewrap.Wrap(errBaseBench, "wrapped with context",
 				ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
 		}
 	})
@@ -97,8 +107,8 @@ func BenchmarkWrap(b *testing.B) {
 	b.Run("FullFeatures", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
-			_ = ewrap.Wrap(baseErr, "full featured wrap",
+		for range b.N {
+			_ = ewrap.Wrap(errBaseBench, "full featured wrap",
 				ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError),
 				ewrap.WithLogger(logger)).
 				WithMetadata("key1", "value1")
@@ -111,11 +121,11 @@ func BenchmarkErrorGroup(b *testing.B) {
 	b.Run("AddErrors", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			group := ewrap.NewErrorGroup()
 
-			for j := range 10 {
-				group.Add(fmt.Errorf("error %d", j))
+			for j := range benchAddErrorCount {
+				group.Add(fmt.Errorf("%w %d", errBaseBench, j))
 			}
 		}
 	})
@@ -126,7 +136,7 @@ func BenchmarkErrorGroup(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			i := 0
 			for pb.Next() {
-				group.Add(fmt.Errorf("error %d", i))
+				group.Add(fmt.Errorf("%w %d", errBaseBench, i))
 				i++
 			}
 		})
@@ -138,7 +148,7 @@ func BenchmarkFormatting(b *testing.B) {
 	err := ewrap.New("test error",
 		ewrap.WithContext(context.Background(), ewrap.ErrorTypeDatabase, ewrap.SeverityError)).
 		WithMetadata("key1", "value1").
-		WithMetadata("key2", 42)
+		WithMetadata("key2", benchMetadataIntValue)
 
 	b.Run("ToJSON", func(b *testing.B) {
 		b.ReportAllocs()
@@ -151,7 +161,7 @@ func BenchmarkFormatting(b *testing.B) {
 	b.Run("ToJSONWithOptions", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_, _ = err.ToJSON(
 				ewrap.WithTimestampFormat(time.RFC3339),
 				ewrap.WithStackTrace(true),
@@ -170,32 +180,35 @@ func BenchmarkFormatting(b *testing.B) {
 
 // BenchmarkCircuitBreaker measures the performance of circuit breaker operations.
 func BenchmarkCircuitBreaker(b *testing.B) {
-	b.Run("RecordFailure", func(b *testing.B) {
-		cb := ewrap.NewCircuitBreaker("test", 5, time.Second)
+	b.Run("RecordFailure", benchBreakerRecordFailure)
+	b.Run("ConcurrentOperations", benchBreakerConcurrent)
+}
 
-		b.ReportAllocs()
+func benchBreakerRecordFailure(b *testing.B) {
+	cb := breaker.New("test", benchBreakerFailLimit, time.Second)
 
-		for i := 0; i < b.N; i++ {
-			cb.RecordFailure()
+	b.ReportAllocs()
 
-			if i%5 == 0 {
-				cb.RecordSuccess() // Reset occasionally
+	for i := range b.N {
+		cb.RecordFailure()
+
+		if i%benchBreakerFailLimit == 0 {
+			cb.RecordSuccess()
+		}
+	}
+}
+
+func benchBreakerConcurrent(b *testing.B) {
+	cb := breaker.New("test", benchBreakerLargeMax, time.Second)
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if cb.CanExecute() {
+				cb.RecordSuccess()
+			} else {
+				cb.RecordFailure()
 			}
 		}
-	})
-
-	b.Run("ConcurrentOperations", func(b *testing.B) {
-		cb := ewrap.NewCircuitBreaker("test", 1000, time.Second)
-
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				if cb.CanExecute() {
-					cb.RecordSuccess()
-				} else {
-					cb.RecordFailure()
-				}
-			}
-		})
 	})
 }
 
@@ -204,24 +217,24 @@ func BenchmarkMetadataOperations(b *testing.B) {
 	b.Run("AddMetadata", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			err := ewrap.New("test error")
-			for j := range 5 {
-				err.WithMetadata(fmt.Sprintf("key%d", j), j)
+			for j := range benchMetadataKeys {
+				_ = err.WithMetadata(fmt.Sprintf("key%d", j), j)
 			}
 		}
 	})
 
 	b.Run("GetMetadata", func(b *testing.B) {
 		err := ewrap.New("test error")
-		for i := range 5 {
-			err.WithMetadata(fmt.Sprintf("key%d", i), i)
+		for i := range benchMetadataKeys {
+			_ = err.WithMetadata(fmt.Sprintf("key%d", i), i)
 		}
 
 		b.ReportAllocs()
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_, _ = err.GetMetadata("key3")
 		}
 	})

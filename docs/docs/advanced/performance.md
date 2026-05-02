@@ -1,324 +1,154 @@
 # Performance Optimization
 
-Understanding how to optimize error handling is crucial for maintaining high-performance applications. While error handling is essential, it shouldn't become a bottleneck in your application. Let's explore how ewrap helps you achieve efficient error handling and learn about optimization strategies.
+ewrap is designed for the hot path. This page collates the design choices
+and the knobs you control.
 
-## Understanding Error Handling Performance
+## Numbers at a glance
 
-When we talk about performance in error handling, we need to consider several aspects:
+`go test -bench=. -benchmem ./test/...` (Apple Silicon, Go 1.25+):
 
-1. Memory allocation and garbage collection impact
-1. CPU overhead from stack trace capture
-1. Concurrency and contention in high-throughput scenarios
-1. The cost of error formatting and logging
-1. The impact of error wrapping chains
+| Benchmark | ns/op | B/op | allocs |
+| --- | ---: | ---: | ---: |
+| `BenchmarkNew/Simple` | 1622 | 496 | 2 |
+| `BenchmarkNew/WithContext` | 5273 | 968 | 6 |
+| `BenchmarkWrap/Simple` | 3828 | 504 | 3 |
+| `BenchmarkWrap/NestedWraps` | 11433 | 1512 | 9 |
+| `BenchmarkErrorGroup/AddErrors` | ~22000 | 752 | 24 |
+| `BenchmarkFormatting/ToJSON` | 16947 | 2941 | 14 |
+| `BenchmarkFormatting/ToYAML` | 247276 | 40472 | 115 |
+| `BenchmarkCircuitBreaker/RecordFailure` | 33 | 0 | 0 |
+| `BenchmarkMetadataOperations/AddMetadata` | 4895 | 852 | 9 |
+| `BenchmarkMetadataOperations/GetMetadata` | 9 | 0 | 0 |
+| `BenchmarkStackTrace/CaptureStack` | 858 | 256 | 1 |
+| `BenchmarkStackTrace/FormatStack` (cached) | **1.71** | 0 | **0** |
 
-Let's explore how ewrap addresses each of these concerns and how you can optimize your error handling.
+## Where the allocations come from
 
-## Memory Management
+A bare `ewrap.New("...")`:
 
-One of the most significant performance impacts in error handling comes from memory allocations. ewrap uses several strategies to minimize this impact:
+1. `*Error` struct — one allocation.
+2. `runtime.Callers` PC slice (32 entries) — one allocation.
 
-### Object Pooling
+That's it — two allocations, ~500 bytes. The metadata map is **lazy**:
+allocated on the first `WithMetadata`, never if you don't call it.
 
-The Error Group pool is a prime example of how we can reduce memory pressure:
+`Wrap` adds a third allocation when the inner error is a `*Error`
+(cloning its metadata map via `maps.Clone`).
 
-```go
-// Create a pool with an appropriate size for your use case
-pool := ewrap.NewErrorGroupPool(4)
+## Caching `Error()` and `Stack()`
 
-func processItems(items []Item) error {
-    // Get an error group from the pool
-    eg := pool.Get()
-    defer eg.Release()  // Return to pool when done
-
-    for _, item := range items {
-        if err := processItem(item); err != nil {
-            eg.Add(err)
-        }
-    }
-
-    return eg.Error()
-}
-```
-
-This approach is particularly effective because:
-
-1. It reduces garbage collection pressure
-1. It minimizes memory fragmentation
-1. It provides predictable memory usage patterns
-
-### Pre-allocation Strategies
-
-When dealing with metadata or formatting, pre-allocation can significantly improve performance:
+Both methods are guarded by `sync.Once`:
 
 ```go
-// Pre-allocate slices with expected capacity
-func buildErrorContext(err error, expectedFields int) map[string]any {
-    // Allocate map with expected size to avoid resizing
-    context := make(map[string]any, expectedFields)
-
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Pre-allocate string builder with reasonable capacity
-        var builder strings.Builder
-        builder.Grow(256)  // Reserve space for typical error message
-
-        // Build context efficiently
-        builder.WriteString("Error occurred in ")
-        builder.WriteString(wrappedErr.Operation())
-        context["message"] = builder.String()
-
-        // Add other fields...
-    }
-
-    return context
-}
+e.errOnce.Do(func() {
+    e.errStr = ... // single computation
+})
+return e.errStr
 ```
 
-## Stack Trace Optimization
+After the first call, every subsequent `Error()` / `Stack()` (and any
+verb that uses them — `%v`, `%+v`, `LogValue`) returns the cached string
+with zero allocations.
 
-Stack traces are expensive to capture, so ewrap implements several optimizations:
+If you log the same error multiple times — common in retry / fan-out
+flows — this is a substantial win.
 
-### Lazy Stack Capture
+## Tuning stack capture
+
+| What | Default | How to change |
+| --- | --- | --- |
+| Capture depth | 32 frames | `WithStackDepth(n)` — pass 0 to disable |
+| Caller skip | starts at user code | `NewSkip(skip, ...)` / `WrapSkip(skip, ...)` for helpers |
+| Frame filter | hides `runtime.*` and ewrap internals | not configurable; fork if needed |
+
+Disabling capture entirely on a hot path:
 
 ```go
-type lazyStack struct {
-    pcs    []uintptr
-    frames runtime.Frames
-    once   sync.Once
-}
-
-func (ls *lazyStack) Frames() runtime.Frames {
-    ls.once.Do(func() {
-        if ls.frames == nil {
-            ls.frames = runtime.CallersFrames(ls.pcs)
-        }
-    })
-    return ls.frames
-}
+ewrap.New("rate limited", ewrap.WithStackDepth(0))
 ```
 
-### Stack Filtering
+This trades the second allocation (PCs slice) for zero stack output — the
+right call when you know the error will be classified-and-returned, not
+debugged.
 
-We filter out unnecessary frames to reduce memory usage and improve readability:
+## `ErrorGroup` pooling
+
+For high-throughput aggregation (validation passes, batch operations,
+fan-out), reuse `ErrorGroup` via a pool:
 
 ```go
-func filterStack(stack []runtime.Frame) []runtime.Frame {
-    filtered := make([]runtime.Frame, 0, len(stack))
-    for _, frame := range stack {
-        if shouldIncludeFrame(frame) {
-            filtered = append(filtered, frame)
-        }
-    }
-    return filtered
-}
+pool := ewrap.NewErrorGroupPool(8) // initial slice capacity per group
 
-func shouldIncludeFrame(frame runtime.Frame) bool {
-    // Skip runtime frames
-    if strings.Contains(frame.File, "runtime/") {
-        return false
-    }
-    // Skip ewrap internal frames
-    if strings.Contains(frame.File, "ewrap/errors.go") {
-        return false
-    }
-    return true
-}
+eg := pool.Get()
+defer eg.Release()
 ```
 
-## Concurrency Optimization
+`Release()` clears the slice (preserving capacity) and returns the group
+to the pool. The pool is goroutine-safe (`sync.Pool`).
 
-In high-concurrency scenarios, efficient error handling becomes even more critical:
+A warm pool eliminates the slice header allocation for new groups; the
+benchmark above (24 allocs for 10 errors with `AddErrors`) drops to 14
+when running with a pool.
 
-### Lock-Free Operations
-
-Where possible, ewrap uses atomic operations instead of locks:
+## Lazy metadata
 
 ```go
-type AtomicCounter struct {
-    value int64
-}
-
-func (c *AtomicCounter) Increment() {
-    atomic.AddInt64(&c.value, 1)
-}
-
-func (c *AtomicCounter) Get() int64 {
-    return atomic.LoadInt64(&c.value)
-}
+err := ewrap.New("boom") // err.metadata == nil
+err.WithMetadata("k", "v") // map is allocated here
 ```
 
-### Minimizing Lock Contention
+Errors that never carry metadata pay zero for the map. The metadata map
+is also cloned (not shared) when `Wrap` inherits from an inner `*Error`,
+so wrapper writes never mutate the inner.
 
-When locks are necessary, we minimize their scope:
+## JSON vs YAML
 
-```go
-func (eg *ErrorGroup) Add(err error) {
-    if err == nil {
-        return
-    }
+JSON via `goccy/go-json` is ~14× faster than YAML for the same payload:
 
-    // Prepare the error outside the lock
-    wrappedErr := prepareError(err)
+| | ns/op | allocs |
+| --- | ---: | ---: |
+| `Error.ToJSON` | 16947 | 14 |
+| `Error.ToYAML` | 247276 | 115 |
 
-    // Minimize critical section
-    eg.mu.Lock()
-    eg.errors = append(eg.errors, wrappedErr)
-    eg.mu.Unlock()
-}
-```
+If you control the format, prefer JSON. Strip stacks for high-volume
+sinks (`WithStackTrace(false)`).
 
-## Formatting Performance
+## Concurrency
 
-Error formatting can be expensive, especially for JSON/YAML conversion. Here's how to optimize it:
+| Type | Locking |
+| --- | --- |
+| `*Error` (read paths after construction) | lock-free (cached, immutable) |
+| `*Error.WithMetadata`, `GetMetadata` | `sync.RWMutex` |
+| `*Error.IncrementRetry` | `sync.RWMutex` (write) |
+| `ErrorGroup.Add`, `Errors`, etc. | `sync.RWMutex` |
+| `breaker.Breaker` ops | single `sync.Mutex` |
 
-### Cached Formatting
+Hot-path reads (`Error()`, `Stack()`, `LogValue`, `Format`) don't take the
+mutex — they read fields set at construction or cached results.
 
-For frequently accessed formats:
+## Hot-path checklist
 
-```go
-type CachedError struct {
-    err          *ewrap.Error
-    jsonCache    atomic.Value
-    yamlCache    atomic.Value
-    cacheTimeout time.Duration
-}
+- ☑ Pool `ErrorGroup` instances if you allocate many per request.
+- ☑ Set `WithStackDepth(0)` on classified-and-returned errors that
+  won't be debugged.
+- ☑ Reuse a single `Logger` and `Observer` across the request — both
+  are inherited by `Wrap`.
+- ☑ Prefer `slog.LogValuer` (no adapter) over `(*Error).Log` when
+  you're already inside an `slog` handler.
+- ☑ Use `ewrap.GetMetadataValue[T]` instead of `GetMetadata` followed
+  by a type assertion.
+- ☐ Don't reallocate `RecoverySuggestion` per call — define them as
+  `var`s and reuse.
+- ☐ Don't log + wrap. Wrap and let the eventual handler log.
 
-func (ce *CachedError) ToJSON() (string, error) {
-    if cached := ce.jsonCache.Load(); cached != nil {
-        cacheEntry := cached.(*formatCacheEntry)
-        if !cacheEntry.isExpired() {
-            return cacheEntry.data, nil
-        }
-    }
+## When ewrap is the wrong tool
 
-    // Format and cache the result
-    json, err := ce.err.ToJSON()
-    if err != nil {
-        return "", err
-    }
-
-    ce.jsonCache.Store(&formatCacheEntry{
-        data:    json,
-        expires: time.Now().Add(ce.cacheTimeout),
-    })
-
-    return json, nil
-}
-```
-
-### Efficient Buffer Usage
-
-When formatting errors:
-
-```go
-// Pool of buffers for formatting
-var bufferPool = sync.Pool{
-    New: func() any {
-        return new(bytes.Buffer)
-    },
-}
-
-func formatError(err *ewrap.Error) string {
-    buf := bufferPool.Get().(*bytes.Buffer)
-    defer func() {
-        buf.Reset()
-        bufferPool.Put(buf)
-    }()
-
-    // Use buffer for formatting
-    buf.WriteString("Error: ")
-    buf.WriteString(err.Error())
-    buf.WriteString("\nStack:\n")
-    buf.WriteString(err.Stack())
-
-    return buf.String()
-}
-```
-
-## Performance Monitoring
-
-To ensure your error handling remains efficient, implement monitoring:
-
-```go
-type ErrorMetrics struct {
-    creationTime   metrics.Histogram
-    wrappingTime   metrics.Histogram
-    stackDepth     metrics.Histogram
-    allocationSize metrics.Histogram
-}
-
-func TrackErrorMetrics(err error, metrics *ErrorMetrics) {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        metrics.stackDepth.Observe(float64(len(wrappedErr.Stack())))
-        // Track other metrics...
-    }
-}
-```
-
-## Best Practices for Performance
-
-### 1. Pool Appropriately
-
-Choose pool sizes based on your application's characteristics:
-
-```go
-func initializePools(config Config) {
-    // Size pools based on expected concurrent operations
-    errorGroupPool := ewrap.NewErrorGroupPool(config.MaxConcurrentOperations)
-
-    // Size buffer pools based on expected error volume
-    bufferPool := sync.Pool{
-        New: func() any {
-            return bytes.NewBuffer(make([]byte, 0, config.AverageErrorSize))
-        },
-    }
-}
-```
-
-### 2. Minimize Allocations
-
-Be mindful of unnecessary allocations:
-
-```go
-// Good - reuse error types for common cases
-var (
-    ErrNotFound = ewrap.New("resource not found",
-        ewrap.WithErrorType(ErrorTypeNotFound))
-    ErrUnauthorized = ewrap.New("unauthorized access",
-        ewrap.WithErrorType(ErrorTypePermission))
-)
-
-// Avoid - creating new errors for common cases
-if !exists {
-    return ewrap.New("resource not found")  // Creates new error each time
-}
-```
-
-### 3. Profile and Monitor
-
-Regularly profile your error handling:
-
-```go
-func TestErrorPerformance(t *testing.T) {
-    if testing.Short() {
-        t.Skip("skipping performance test in short mode")
-    }
-
-    // Profile creation
-    b.Run("ErrorCreation", func(b *testing.B) {
-        b.ResetTimer()
-        for i := 0; i < b.N; i++ {
-            _ = ewrap.New("test error")
-        }
-    })
-
-    // Profile wrapping
-    b.Run("ErrorWrapping", func(b *testing.B) {
-        baseErr := errors.New("base error")
-        b.ResetTimer()
-        for i := 0; i < b.N; i++ {
-            _ = ewrap.Wrap(baseErr, "wrapped error")
-        }
-    })
-}
-```
+- **Inner loops processing millions of items:** errors should be
+  exceptional. If you're allocating one per iteration, restructure the
+  algorithm so failure is rare or signalled differently (sentinel
+  variable, skip count, channel signal).
+- **CGo error wrappers:** stack capture across the cgo boundary is
+  pointless. Use `ewrap.New(msg, ewrap.WithStackDepth(0))` and pass the
+  C errno via metadata.
+- **Single-binary CLI tools:** the structured fields are overkill —
+  `fmt.Errorf` with `%w` is plenty.

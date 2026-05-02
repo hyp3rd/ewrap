@@ -1,296 +1,188 @@
 # Error Groups
 
-Error Groups in ewrap provide a powerful way to collect, manage, and handle multiple errors together. They are particularly useful in concurrent operations, validation scenarios, or any situation where multiple errors might occur and need to be handled cohesively.
+`ErrorGroup` aggregates multiple errors into a single `error`-implementing
+value. Use it for validation passes, batch operations, fan-out fan-in
+goroutine work, or anywhere you'd otherwise return the first error and
+silently drop the rest.
 
-## Understanding Error Groups
-
-An Error Group acts as a thread-safe container for multiple errors. Think of it as a collector that can gather errors from various operations while ensuring that all errors are properly tracked and can be processed together. What makes our implementation special is its efficient memory usage through a pooling mechanism.
-
-## Basic Usage
-
-Let's start with the fundamental ways to use Error Groups:
+## Quick start
 
 ```go
-// Create a pool for error groups
-pool := ewrap.NewErrorGroupPool(4)  // Initial capacity of 4 errors
+eg := ewrap.NewErrorGroup()
+eg.Add(validate(req))
+eg.Add(persist(req))
+eg.Add(notify(req))
 
-// Get an error group from the pool
+if err := eg.ErrorOrNil(); err != nil {
+    return err
+}
+```
+
+`Add(nil)` is a no-op, so you can call it unconditionally.
+
+## Pooled allocation
+
+For high-throughput paths, reuse `ErrorGroup` instances via `ErrorGroupPool`:
+
+```go
+pool := ewrap.NewErrorGroupPool(4) // initial slice capacity
+
 eg := pool.Get()
-defer eg.Release()  // Don't forget to release it back to the pool
+defer eg.Release() // returns it to the pool, cleared
 
-// Add errors to the group
-eg.Add(ewrap.New("validation failed for email"))
-eg.Add(ewrap.New("validation failed for password"))
+eg.Add(err1)
+eg.Add(err2)
+```
 
-// Aggregate errors using errors.Join
+`Release()` clears the underlying slice (preserving capacity) and puts the
+group back in the pool. Calling `Release()` on a non-pooled group is a no-op.
+
+## Reading the group
+
+```go
+eg.HasErrors()              // bool
+len(eg.Errors())            // count (clones the slice)
+eg.Error()                  // formatted "N errors occurred:\n..." text
+eg.ErrorOrNil()             // returns eg if non-empty, else nil
+eg.Join()                   // errors.Join semantics — single, multi-cause error
+```
+
+`Errors()` returns a defensive copy via `slices.Clone` so callers can't
+mutate the group's internal state.
+
+## `errors.Is` / `errors.As` over a group
+
+`Join()` returns a value compatible with `errors.Join`, so the stdlib walks
+through every member:
+
+```go
+joined := eg.Join()
+
+errors.Is(joined, sql.ErrNoRows)   // true if any member matches
+errors.Is(joined, io.EOF)          // ditto
+errors.As(joined, &myCustomError)  // first matching member fills target
+```
+
+## Concurrent use
+
+`Add`, `HasErrors`, `Error`, `Errors`, `Join`, and `Clear` are all
+goroutine-safe via an internal `sync.RWMutex`. Typical fan-out fan-in:
+
+```go
+eg := pool.Get()
+defer eg.Release()
+
+var wg sync.WaitGroup
+for _, item := range items {
+    wg.Add(1)
+    go func(it Item) {
+        defer wg.Done()
+        eg.Add(process(it))
+    }(item)
+}
+wg.Wait()
+
 if err := eg.Join(); err != nil {
-    fmt.Printf("Encountered errors: %v\n", err)
+    return err
 }
 ```
 
-## Error Group Pooling
+## Serialization
 
-Our Error Group implementation uses a pool to reuse instances efficiently. This is particularly valuable in high-throughput scenarios where creating and destroying error groups frequently could impact performance.
-
-### How Pooling Works
-
-The pooling mechanism works behind the scenes to manage memory efficiently:
+`ErrorGroup` implements `json.Marshaler` and `yaml.Marshaler`, plus explicit
+`ToJSON()` / `ToYAML()` methods for callers that want the result as a string.
 
 ```go
-// Create a pool with specific capacity
-pool := ewrap.NewErrorGroupPool(4)
+jsonStr, _ := eg.ToJSON()
+yamlStr, _ := eg.ToYAML()
 
-func processUserRegistration(user User) error {
-    // Get an error group from the pool
-    eg := pool.Get()
-    defer eg.Release()  // Returns the group to the pool when done
+bytes, _ := json.Marshal(eg) // also works
+```
 
-    // Validate different aspects of the user
-    if err := validateEmail(user.Email); err != nil {
-        eg.Add(err)
+The serialized payload includes:
+
+```json
+{
+  "error_count": 2,
+  "timestamp": "2026-05-02T10:11:12Z",
+  "errors": [
+    {
+      "message": "validation failed: missing field 'email'",
+      "type": "ewrap",
+      "stack_trace": [
+        {"function": "...", "file": "...", "line": 42, "pc": 12345}
+      ],
+      "metadata": {"field": "email"},
+      "cause": null
+    },
+    {
+      "message": "EOF",
+      "type": "standard"
     }
-
-    if err := validatePassword(user.Password); err != nil {
-        eg.Add(err)
-    }
-
-    if err := validateAge(user.Age); err != nil {
-        eg.Add(err)
-    }
-
-    return eg.Error()
+  ]
 }
 ```
 
-## Concurrent Operations
+The cause chain is preserved for both `*Error` members and standard wrapped
+errors (the serializer walks them via `errors.Unwrap`), so transport
+consumers see the full picture.
 
-Error Groups are particularly useful in concurrent operations. They're designed to be thread-safe and can safely collect errors from multiple goroutines:
+## Patterns
 
-```go
-func processItems(items []Item) error {
-    pool := ewrap.NewErrorGroupPool(len(items))
-    eg := pool.Get()
-    defer eg.Release()
-
-    var wg sync.WaitGroup
-
-    for _, item := range items {
-        wg.Add(1)
-        go func(item Item) {
-            defer wg.Done()
-
-            if err := processItem(item); err != nil {
-                eg.Add(ewrap.Wrap(err, fmt.Sprintf("failed to process item %d", item.ID)))
-            }
-        }(item)
-    }
-
-    wg.Wait()
-    return eg.Error()
-}
-```
-
-## Validation Scenarios
-
-Error Groups excel at collecting validation errors, allowing you to report all validation failures at once rather than stopping at the first error:
+### Validation pass
 
 ```go
-func validateUser(user User) error {
-    pool := ewrap.NewErrorGroupPool(4)
+func validateOrder(o Order) error {
     eg := pool.Get()
     defer eg.Release()
 
-    // Validate email format
-    if !isValidEmail(user.Email) {
-        eg.Add(ewrap.New("invalid email format",
-            ewrap.WithErrorType(ewrap.ErrorTypeValidation)))
+    if o.Customer == "" {
+        eg.Add(ewrap.New("missing customer",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)))
+    }
+    if o.Total <= 0 {
+        eg.Add(ewrap.New("invalid total",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)))
     }
 
-    // Validate password strength
-    if !isStrongPassword(user.Password) {
-        eg.Add(ewrap.New("password too weak",
-            ewrap.WithErrorType(ewrap.ErrorTypeValidation)))
-    }
-
-    // Validate age
-    if user.Age < 18 {
-        eg.Add(ewrap.New("user must be 18 or older",
-            ewrap.WithErrorType(ewrap.ErrorTypeValidation)))
-    }
-
-    return eg.Error()
+    return eg.ErrorOrNil()
 }
 ```
 
-## Advanced Usage Patterns
-
-### Hierarchical Error Collection
-
-You can create hierarchical error structures by nesting error groups:
+### Best-effort cleanup
 
 ```go
-func validateOrder(order Order) error {
-    mainPool := ewrap.NewErrorGroupPool(2)
-    mainGroup := mainPool.Get()
-    defer mainGroup.Release()
-
-    // Validate customer details
-    if err := func() error {
-        customerPool := ewrap.NewErrorGroupPool(3)
-        customerGroup := customerPool.Get()
-        defer customerGroup.Release()
-
-        if err := validateCustomerEmail(order.Customer.Email); err != nil {
-            customerGroup.Add(err)
-        }
-        if err := validateCustomerAddress(order.Customer.Address); err != nil {
-            customerGroup.Add(err)
-        }
-
-        return customerGroup.Error()
-    }(); err != nil {
-        mainGroup.Add(ewrap.Wrap(err, "customer validation failed"))
-    }
-
-    // Validate order items
-    if err := func() error {
-        itemsPool := ewrap.NewErrorGroupPool(len(order.Items))
-        itemsGroup := itemsPool.Get()
-        defer itemsGroup.Release()
-
-        for _, item := range order.Items {
-            if err := validateOrderItem(item); err != nil {
-                itemsGroup.Add(err)
-            }
-        }
-
-        return itemsGroup.Error()
-    }(); err != nil {
-        mainGroup.Add(ewrap.Wrap(err, "order items validation failed"))
-    }
-
-    return mainGroup.Error()
-}
-```
-
-### Error Group with Circuit Breaker
-
-Combine Error Groups with Circuit Breakers for robust error handling:
-
-```go
-func processOrderBatch(orders []Order) error {
-    pool := ewrap.NewErrorGroupPool(len(orders))
+func close(resources []io.Closer) error {
     eg := pool.Get()
     defer eg.Release()
 
-    cb := ewrap.NewCircuitBreaker("order-processing", 5, time.Minute)
-
-    for _, order := range orders {
-        if !cb.CanExecute() {
-            eg.Add(ewrap.New("circuit breaker open: too many failures",
-                ewrap.WithErrorType(ewrap.ErrorTypeInternal)))
-            break
-        }
-
-        if err := processOrder(order); err != nil {
-            cb.RecordFailure()
-            eg.Add(ewrap.Wrap(err, fmt.Sprintf("failed to process order %s", order.ID)))
-        } else {
-            cb.RecordSuccess()
-        }
+    for _, r := range resources {
+        eg.Add(r.Close())
     }
-
-    return eg.Error()
+    return eg.Join() // single error containing every Close failure
 }
 ```
 
-## Performance Considerations
+### Mixed wrapping
 
-The pooled Error Group implementation is designed for high performance, but there are some best practices to follow:
+```go
+eg.Add(ewrap.Wrap(httpErr, "fetching user",
+    ewrap.WithHTTPStatus(http.StatusBadGateway)))
+eg.Add(ewrap.Wrap(dbErr, "loading order"))
+eg.Add(io.EOF) // raw stdlib error mixes fine
+```
 
-1. **Choose Appropriate Pool Capacity**:
+The serializer normalises all members into the same shape, so consumers
+don't need to special-case ewrap vs standard errors.
 
-    ```go
-    // For known size operations
-    pool := ewrap.NewErrorGroupPool(len(items))
+## Performance
 
-    // For variable size operations, estimate typical case
-    pool := ewrap.NewErrorGroupPool(4)  // If you typically expect 1-4 errors
-    ```
+| Operation | ns/op | allocs |
+| --- | ---: | ---: |
+| `Add` (non-nil) | ~30 | 0 (steady state) |
+| `Get` from pool | ~50 | 0 (warm pool) |
+| `Error()` (formatted) | varies | 1 (builder) |
+| `ToJSON` (10 entries) | ~10 µs | ~30 |
 
-1. **Release Groups Properly**:
-
-    ```go
-    func processWithErrors() error {
-        eg := pool.Get()
-        // Always release with defer to prevent leaks
-        defer eg.Release()
-
-        // Use the error group...
-        return eg.Error()
-    }
-    ```
-
-1. **Reuse Pools**:
-
-    ```go
-    // Good: Create pool once and reuse
-    var validationPool = ewrap.NewErrorGroupPool(4)
-
-    func validateData(data Data) error {
-        eg := validationPool.Get()
-        defer eg.Release()
-        // Use the error group...
-    }
-
-    // Less efficient: Creating new pools frequently
-    func validateData(data Data) error {
-        pool := ewrap.NewErrorGroupPool(4)  // Don't do this
-        eg := pool.Get()
-        // ...
-    }
-
-    ```
-
-## Best Practices
-
-1. **Always Release Error Groups**:
-    Use defer to ensure Error Groups are always released back to their pool:
-
-    ```go
-    eg := pool.Get()
-    defer eg.Release()
-    ```
-
-1. **Size Pools Appropriately**:
-    Choose pool sizes based on your expected error cases:
-
-    ```go
-    // For validation where you know the maximum possible errors
-    pool := ewrap.NewErrorGroupPool(len(validationRules))
-    ```
-
-1. **Handle Nested Operations**:
-    When dealing with nested operations, manage Error Groups carefully:
-
-    ```go
-    func processComplex() error {
-        outerPool := ewrap.NewErrorGroupPool(2)
-        outerGroup := outerPool.Get()
-        defer outerGroup.Release()
-
-        for _, item := range items {
-            innerPool := ewrap.NewErrorGroupPool(4)
-            innerGroup := innerPool.Get()
-
-            // Process with inner group...
-
-            if err := innerGroup.Error(); err != nil {
-                outerGroup.Add(err)
-            }
-            innerGroup.Release()
-        }
-
-        return outerGroup.Error()
-    }
-    ```
+The pool eliminates the per-error allocation of the slice header in
+hot paths.

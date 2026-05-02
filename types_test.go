@@ -2,26 +2,36 @@ package ewrap
 
 import "testing"
 
+const (
+	invalidEnumValue       = 999
+	errorTypeExternalValue = 8
+	severityCriticalValue  = 3
+)
+
 func TestErrorType_String(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		et       ErrorType
 		expected string
 	}{
-		{"Unknown", ErrorTypeUnknown, "unknown"},
-		{"Validation", ErrorTypeValidation, "validation"},
-		{"NotFound", ErrorTypeNotFound, "not_found"},
-		{"Permission", ErrorTypePermission, "permission"},
-		{"Database", ErrorTypeDatabase, "database"},
-		{"Network", ErrorTypeNetwork, "network"},
-		{"Configuration", ErrorTypeConfiguration, "configuration"},
-		{"Internal", ErrorTypeInternal, "internal"},
-		{"External", ErrorTypeExternal, "external"},
-		{"Invalid", ErrorType(999), "unknown"},
+		{"Unknown", ErrorTypeUnknown, typeUnknownStr},
+		{"Validation", ErrorTypeValidation, typeValidationStr},
+		{"NotFound", ErrorTypeNotFound, typeNotFoundStr},
+		{"Permission", ErrorTypePermission, typePermissionStr},
+		{"Database", ErrorTypeDatabase, typeDatabaseStr},
+		{"Network", ErrorTypeNetwork, typeNetworkStr},
+		{"Configuration", ErrorTypeConfiguration, typeConfigurationStr},
+		{"Internal", ErrorTypeInternal, typeInternalStr},
+		{"External", ErrorTypeExternal, typeExternalStr},
+		{"Invalid", ErrorType(invalidEnumValue), typeUnknownStr},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.et.String(); got != tt.expected {
 				t.Errorf("ErrorType.String() = %v, want %v", got, tt.expected)
 			}
@@ -30,20 +40,24 @@ func TestErrorType_String(t *testing.T) {
 }
 
 func TestSeverity_String(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		s        Severity
 		expected string
 	}{
-		{"Info", SeverityInfo, "info"},
-		{"Warning", SeverityWarning, "warning"},
-		{"Error", SeverityError, "error"},
-		{"Critical", SeverityCritical, "critical"},
-		{"Invalid", Severity(999), "unknown"},
+		{"Info", SeverityInfo, severityInfoStr},
+		{"Warning", SeverityWarning, severityWarningStr},
+		{"Error", SeverityError, severityErrorStr},
+		{"Critical", SeverityCritical, severityCriticalStr},
+		{"Invalid", Severity(invalidEnumValue), typeUnknownStr},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.s.String(); got != tt.expected {
 				t.Errorf("Severity.String() = %v, want %v", got, tt.expected)
 			}
@@ -52,7 +66,8 @@ func TestSeverity_String(t *testing.T) {
 }
 
 func TestErrorTypeConstants(t *testing.T) {
-	// Test that constants have expected values
+	t.Parallel()
+
 	if ErrorTypeUnknown != 0 {
 		t.Errorf("ErrorTypeUnknown = %d, want 0", ErrorTypeUnknown)
 	}
@@ -61,13 +76,14 @@ func TestErrorTypeConstants(t *testing.T) {
 		t.Errorf("ErrorTypeValidation = %d, want 1", ErrorTypeValidation)
 	}
 
-	if ErrorTypeExternal != 8 {
-		t.Errorf("ErrorTypeExternal = %d, want 8", ErrorTypeExternal)
+	if ErrorTypeExternal != errorTypeExternalValue {
+		t.Errorf("ErrorTypeExternal = %d, want %d", ErrorTypeExternal, errorTypeExternalValue)
 	}
 }
 
 func TestSeverityConstants(t *testing.T) {
-	// Test that constants have expected values
+	t.Parallel()
+
 	if SeverityInfo != 0 {
 		t.Errorf("SeverityInfo = %d, want 0", SeverityInfo)
 	}
@@ -76,24 +92,30 @@ func TestSeverityConstants(t *testing.T) {
 		t.Errorf("SeverityWarning = %d, want 1", SeverityWarning)
 	}
 
-	if SeverityCritical != 3 {
-		t.Errorf("SeverityCritical = %d, want 3", SeverityCritical)
+	if SeverityCritical != severityCriticalValue {
+		t.Errorf("SeverityCritical = %d, want %d", SeverityCritical, severityCriticalValue)
 	}
 }
 
 func TestRecoverySuggestion(t *testing.T) {
+	t.Parallel()
+
+	const wantMessage = "Test message"
+
 	rs := RecoverySuggestion{
-		Message:       "Test message",
+		Message:       wantMessage,
 		Actions:       []string{"action1", "action2"},
 		Documentation: "https://example.com/docs",
 	}
 
-	if rs.Message != "Test message" {
-		t.Errorf("RecoverySuggestion.Message = %v, want %v", rs.Message, "Test message")
+	if rs.Message != wantMessage {
+		t.Errorf("RecoverySuggestion.Message = %v, want %v", rs.Message, wantMessage)
 	}
 
-	if len(rs.Actions) != 2 {
-		t.Errorf("len(RecoverySuggestion.Actions) = %v, want %v", len(rs.Actions), 2)
+	const wantActionCount = 2
+
+	if len(rs.Actions) != wantActionCount {
+		t.Errorf("len(RecoverySuggestion.Actions) = %v, want %v", len(rs.Actions), wantActionCount)
 	}
 
 	if rs.Documentation != "https://example.com/docs" {

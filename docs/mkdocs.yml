@@ -93,9 +93,16 @@ nav:
       - Error Wrapping: features/error-wrapping.md
       - Stack Traces: features/stack-traces.md
       - Error Groups: features/error-groups.md
-      - Circuit Breaker: features/circuit-breaker.md
       - Metadata: features/metadata.md
       - Logging: features/logging.md
+      - Observability: features/observability.md
+      - Serialization: features/serialization.md
+  - Operational Features:
+      - HTTP / Retry / Safe: features/operational.md
+      - fmt.Formatter and slog: features/format-and-slog.md
+  - Subpackages:
+      - breaker (circuit breaker): features/circuit-breaker.md
+      - slog adapter: features/slog-adapter.md
   - Advanced Usage:
       - Error Strategies: advanced/error-strategies.md
       - Performance Optimization: advanced/performance.md
@@ -124,4 +131,4 @@ extra:
 extra_css:
   - stylesheets/extra.css
 
-copyright: Copyright &copy; 2024 Francesco Cosentino
+copyright: Copyright &copy; Francesco Cosentino

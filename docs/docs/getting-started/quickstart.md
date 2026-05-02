@@ -1,124 +1,158 @@
-# Quick Start Guide
+# Quick Start
 
-This guide will help you get started with ewrap quickly. We'll cover the basic concepts and show you how to use the main features of the package.
+This guide walks through the core surface of ewrap in five minutes.
 
-## Basic Usage
-
-### Creating Errors
-
-The simplest way to create an error with ewrap is using the `New` function:
+## Create errors
 
 ```go
-err := ewrap.New("something went wrong")
+import "github.com/hyp3rd/ewrap"
+
+err := ewrap.New("database connection failed") // captures stack at the call site
 ```
 
-### Adding Context
+The returned `*Error` implements the `error` interface. You can return it
+anywhere a regular `error` is expected.
 
-You can add context to your errors using various options:
+## Format with arguments — `Newf` is `%w`-aware
 
 ```go
-err := ewrap.New("database connection failed",
-    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
-    ewrap.WithLogger(logger))
+err := ewrap.Newf("query %q failed: %w", q, ioErr)
+
+errors.Is(err, ioErr) // true — %w preserves the cause chain
+err.Error()           // "query \"...\" failed: <ioErr.Error()>"
 ```
 
-### Wrapping Errors
+If `format` doesn't contain `%w`, `Newf` behaves like `fmt.Sprintf` plus a
+stack capture.
 
-When you want to add context to an existing error:
+## Wrap existing errors
 
 ```go
-if err != nil {
-    return ewrap.Wrap(err, "failed to process request")
+if err := db.Ping(); err != nil {
+    return ewrap.Wrap(err, "syncing replicas")
 }
 ```
 
-### Using Error Groups
+`Wrap` captures its own stack frames, so deep chains carry the full call
+history rather than just the innermost site. `Wrap(nil, ...)` returns nil
+so you can call it unconditionally if you prefer.
 
-Error groups help you collect and manage multiple errors:
+`Wrapf` is the formatted variant:
 
 ```go
-// Create an error group pool
+return ewrap.Wrapf(err, "loading row %d for tenant %s", id, tenantID)
+```
+
+## Add structured context
+
+```go
+err := ewrap.New("payment authorization rejected",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError),
+    ewrap.WithHTTPStatus(http.StatusBadGateway),
+    ewrap.WithRetryable(true),
+    ewrap.WithSafeMessage("payment authorization rejected"), // omits PII
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message:       "Inspect upstream provider's queue and retry after backoff.",
+        Documentation: "https://runbooks.example.com/payments/timeout",
+    }),
+).
+    WithMetadata("provider", "stripe").
+    WithMetadata("attempt", 2)
+```
+
+Reserved fields (`ErrorContext`, `RecoverySuggestion`, `RetryInfo`) live in
+typed fields, not the user metadata map — they have dedicated accessors and
+can't be silently overwritten by a stray `WithMetadata` key.
+
+## Read the structured fields back
+
+```go
+err.GetErrorContext()         // *ErrorContext (or nil)
+err.Recovery()                // *RecoverySuggestion (or nil)
+err.Retry()                   // *RetryInfo (or nil)
+err.GetMetadata("attempt")    // (any, bool) for user metadata
+
+ewrap.GetMetadataValue[int](err, "attempt") // generic, type-checked accessor
+```
+
+## Walk and classify the chain
+
+```go
+errors.Is(err, ioErr)
+errors.As(err, &netErr)
+errors.Unwrap(err)
+
+ewrap.HTTPStatus(err)   // walks chain; 0 if no layer set one
+ewrap.IsRetryable(err)  // true if any layer set Retryable, or stdlib Temporary()
+err.SafeError()         // redacted variant for external sinks
+```
+
+## Format and log
+
+```go
+fmt.Printf("%+v\n", err)         // message + filtered stack (fmt.Formatter)
+fmt.Printf("%v\n", err)          // message only
+fmt.Printf("%q\n", err)          // quoted
+
+slog.Error("payment failed", "err", err) // *Error implements slog.LogValuer
+```
+
+When you've attached a `Logger`, `(*Error).Log` emits a single structured
+record with message, cause, stack, recovery, and all metadata:
+
+```go
+err := ewrap.New("boom", ewrap.WithLogger(logger))
+err.Log()
+```
+
+## Aggregate with `ErrorGroup`
+
+```go
 pool := ewrap.NewErrorGroupPool(4)
-
-// Get an error group from the pool
 eg := pool.Get()
-defer eg.Release()  // Don't forget to release it back to the pool
+defer eg.Release()
 
-// Add errors as needed
-eg.Add(err1)
-eg.Add(err2)
+eg.Add(validate(req))
+eg.Add(persist(req))
 
-if eg.HasErrors() {
-    return eg.Error()
+if err := eg.Join(); err != nil { // errors.Join semantics
+    return err
 }
 ```
 
-### Implementing Circuit Breaker
+`(*ErrorGroup).ToJSON()` and `ToYAML()` walk both `*Error` and standard
+wrapped chains.
 
-Protect your system from cascading failures:
+## Add a circuit breaker (opt-in)
 
 ```go
-cb := ewrap.NewCircuitBreaker("database", 3, time.Minute)
+import "github.com/hyp3rd/ewrap/breaker"
 
-if cb.CanExecute() {
-    err := performOperation()
-    if err != nil {
-        cb.RecordFailure()
-        return err
-    }
-    cb.RecordSuccess()
+cb := breaker.New("payments", 5, 30*time.Second)
+
+if !cb.CanExecute() {
+    return ewrap.New("payments breaker open", ewrap.WithRetryable(true))
 }
+
+if err := charge(req); err != nil {
+    cb.RecordFailure()
+
+    return ewrap.Wrap(err, "charging customer",
+        ewrap.WithHTTPStatus(http.StatusBadGateway))
+}
+
+cb.RecordSuccess()
 ```
 
-## Next Steps
+The breaker is in a sibling subpackage, so importing only `ewrap` doesn't
+bring it into your binary.
 
-Now that you understand the basics, you can:
+## Where to go next
 
-1. Learn about [Error Types](../features/error-types.md)
-1. Explore [Logging Integration](../features/logging.md)
-1. Study [Advanced Usage](../advanced/performance.md)
-1. Check out complete [Examples](../examples/basic.md)
-
-## Best Practices
-
-Here are some best practices to follow when using ewrap:
-
-1. Always provide meaningful error messages
-1. Use appropriate error types and severity levels
-1. Release error groups back to their pools
-1. Configure circuit breakers based on your system's characteristics
-1. Implement proper logging integration
-1. Use metadata to add relevant debugging information
-
-## Common Patterns
-
-Here are some common patterns you might find useful:
-
-```go
-func processItem(ctx context.Context, item string) error {
-    // Create error group from pool
-    pool := ewrap.NewErrorGroupPool(4)
-    eg := pool.Get()
-    defer eg.Release()
-
-    // Validate input
-    if err := validate(item); err != nil {
-        eg.Add(ewrap.Wrap(err, "validation failed",
-            ewrap.WithContext(ctx),
-            ewrap.WithErrorType(ewrap.ErrorTypeValidation)))
-    }
-
-    // Process if no validation errors
-    if !eg.HasErrors() {
-        if err := process(item); err != nil {
-            return ewrap.Wrap(err, "processing failed",
-                ewrap.WithContext(ctx),
-                ewrap.WithErrorType(ewrap.ErrorTypeInternal))
-        }
-    }
-
-    return eg.Error()
-}
-```
-
-This is just a starting point. For more detailed information about specific features, check out the relevant sections in the documentation.
+- [Error Creation](../features/error-creation.md) — `New`, `Newf`, options
+- [Error Wrapping](../features/error-wrapping.md) — `Wrap`, `Wrapf`, chain semantics
+- [Stack Traces](../features/stack-traces.md) — capture, filter, depth, caller skip
+- [Operational Features](../features/operational.md) — HTTP / retry / safe message
+- [`fmt.Formatter` & `slog`](../features/format-and-slog.md)
+- [Circuit Breaker](../features/circuit-breaker.md)
+- [API Reference](../api/overview.md)

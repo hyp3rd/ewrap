@@ -1,338 +1,169 @@
 # Stack Traces
 
-Stack traces are crucial for understanding where and why errors occur in your application. In ewrap, stack traces are automatically captured and enhanced to provide meaningful debugging information while maintaining performance. The latest version includes programmatic stack frame inspection through iterators and structured access.
+ewrap captures a stack trace on every constructor call and exposes it via
+`(*Error).Stack()`, `fmt.Printf("%+v", err)`, and an iterator API. Captures
+are tunable; formatted output is cached so you can read it freely.
 
-## Understanding Stack Traces
+## What gets captured
 
-A stack trace represents the sequence of function calls that led to an error. Think of it as a trail of breadcrumbs showing exactly how your program reached a particular point of failure. ewrap captures this information automatically while filtering out unnecessary noise.
+- `runtime.Callers` records up to **32** program counters by default.
+- The capture skips the ewrap entry point so the first visible frame is
+  your call to `New` / `Wrap` / `Newf` / `Wrapf`.
+- Internal ewrap frames are filtered from the rendered output. Test files
+  in the same package are allowed through so the library's own tests still
+  produce useful traces.
 
-## How ewrap Captures Stack Traces
+## Reading the stack
 
-When you create a new error using ewrap, it automatically captures the current stack trace:
-
-```go
-func processUserData(userID string) error {
-    // This will capture the stack trace automatically
-    if err := validateUser(userID); err != nil {
-        return ewrap.New("user validation failed")
-    }
-    return nil
-}
-```
-
-The captured stack trace includes:
-
-- Function names
-- File names
-- Line numbers
-- Program counter (PC) values
-
-However, ewrap goes beyond simple capture by:
-
-1. Filtering out runtime implementation details
-1. Maintaining stack traces through error wrapping
-1. Providing formatted output options
-1. Offering programmatic access through iterators
-
-## Programmatic Stack Frame Access
-
-### Using Stack Iterators
-
-The new stack iterator provides efficient, lazy access to stack frames:
+### As a formatted string
 
 ```go
-func analyzeError(err error) {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        iterator := wrappedErr.GetStackIterator()
-
-        for iterator.HasNext() {
-            frame := iterator.Next()
-
-            fmt.Printf("Function: %s\n", frame.Function)
-            fmt.Printf("File: %s:%d\n", frame.File, frame.Line)
-            fmt.Printf("PC: %x\n", frame.PC)
-
-            // Custom logic based on frame information
-            if strings.Contains(frame.Function, "database") {
-                handleDatabaseFrame(frame)
-            }
-        }
-    }
-}
+fmt.Println(err.Stack())
 ```
 
-### Accessing All Frames
-
-Get all stack frames at once for batch processing:
-
-```go
-func generateErrorReport(err error) ErrorReport {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        frames := wrappedErr.GetStackFrames()
-
-        return ErrorReport{
-            Message: wrappedErr.Error(),
-            StackFrames: frames,
-            Timestamp: time.Now(),
-        }
-    }
-    return ErrorReport{}
-}
-```
-
-### Stack Frame Structure
-
-Each stack frame provides detailed information:
-
-```go
-type StackFrame struct {
-    Function string  `json:"function" yaml:"function"` // Fully qualified function name
-    File     string  `json:"file" yaml:"file"`         // Source file path
-    Line     int     `json:"line" yaml:"line"`         // Line number
-    PC       uintptr `json:"pc" yaml:"pc"`             // Program counter
-}
-```
-
-## Iterator Operations
-
-### Navigation and Control
-
-```go
-iterator := wrappedErr.GetStackIterator()
-
-// Check if more frames are available
-if iterator.HasNext() {
-    frame := iterator.Next()
-    // Process frame
-}
-
-// Reset iterator to beginning
-iterator.Reset()
-
-// Get remaining frames from current position
-remainingFrames := iterator.Frames()
-
-// Get all frames regardless of current position
-allFrames := iterator.AllFrames()
-```
-
-### Filtering and Processing
-
-```go
-func findApplicationFrames(err error) []StackFrame {
-    var appFrames []StackFrame
-
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        iterator := wrappedErr.GetStackIterator()
-
-        for iterator.HasNext() {
-            frame := iterator.Next()
-
-            // Filter for application-specific frames
-            if strings.Contains(frame.File, "/myapp/") &&
-               !strings.Contains(frame.File, "/vendor/") {
-                appFrames = append(appFrames, *frame)
-            }
-        }
-    }
-
-    return appFrames
-}
-```
-
-When working with JSON output:
-
-```go
-err := ewrap.New("database connection failed")
-jsonOutput, _ := err.ToJSON(ewrap.WithStackTrace(true))
-fmt.Println(jsonOutput)
-```
-
-## Stack Trace Filtering
-
-ewrap automatically filters stack traces to remove unhelpful information. Consider this example:
-
-```go
-func getUserProfile(id string) (*Profile, error) {
-    profile, err := db.GetProfile(id)
-    if err != nil {
-        // The stack trace will exclude runtime internals
-        return nil, ewrap.Wrap(err, "failed to retrieve user profile")
-    }
-    return profile, nil
-}
-```
-
-The resulting stack trace might look like this:
+Output (one frame per line):
 
 ```text
-/app/services/user.go:25 - getUserProfile
-/app/handlers/profile.go:42 - HandleProfileRequest
-/app/router/routes.go:156 - ServeHTTP
-```
-
-Instead of the more verbose and less helpful unfiltered version:
-
-```text
-/app/services/user.go:25 - getUserProfile
-/app/handlers/profile.go:42 - HandleProfileRequest
-/app/router/routes.go:156 - ServeHTTP
-/usr/local/go/src/runtime/asm_amd64.s:1571 - goexit
-/usr/local/go/src/runtime/proc.go:203 - main
+/path/to/repo/db.go:42 - example.com/repo/db.queryUser
+/path/to/repo/handlers.go:71 - example.com/repo/handlers.GetProfile
 ...
 ```
 
-## Stack Traces in Error Chains
+`Stack()` formats and caches the result on first call via `sync.Once`;
+subsequent calls return the cached string with no allocations.
 
-When you wrap errors, ewrap preserves the original stack trace while maintaining the error chain:
+### As frames you can walk
 
 ```go
-func processOrder(orderID string) error {
-    // Original error with its stack trace
-    err := validateOrder(orderID)
-    if err != nil {
-        // Wraps the error while preserving the original stack trace
-        return ewrap.Wrap(err, "order validation failed")
-    }
-
-    err = saveOrder(orderID)
-    if err != nil {
-        // Each wrap maintains the complete error context
-        return ewrap.Wrap(err, "failed to save order")
-    }
-
-    return nil
+for it := err.GetStackIterator(); it.HasNext(); {
+    f := it.Next()
+    fmt.Printf("%s:%d %s (pc=%x)\n", f.File, f.Line, f.Function, f.PC)
 }
 ```
 
-## Performance Considerations
+`StackIterator` supports `Next`, `HasNext`, `Reset`, `Frames` (remaining
+slice), and `AllFrames` (full slice).
 
-While stack traces are valuable for debugging, they do come with some overhead. ewrap optimizes this by:
-
-1. Using efficient stack capture mechanisms
-1. Implementing lazy formatting
-1. Caching stack trace strings
-1. Filtering irrelevant frames early
-
-Here's how to work with stack traces efficiently:
+For a one-shot snapshot:
 
 ```go
-func processItems(items []Item) error {
-    for _, item := range items {
-        if err := processItem(item); err != nil {
-            // In tight loops, consider whether you need the stack trace
-            if isCriticalError(err) {
-                return ewrap.Wrap(err, "critical error during item processing")
-            }
-            // For non-critical errors, maybe just log and continue
-            log.Printf("Non-critical error: %v", err)
-            continue
-        }
-    }
-    return nil
+frames := err.GetStackFrames()
+```
+
+`StackFrame` is JSON/YAML-tagged so it serializes cleanly.
+
+### Via `%+v`
+
+```go
+fmt.Printf("%+v\n", err)
+// boom
+// /path/to/foo.go:12 - example.com/foo.do
+// ...
+```
+
+`(*Error).Format` implements `fmt.Formatter`. Other verbs:
+
+- `%s`, `%v` — the error message only
+- `%q` — quoted message
+- `%+v` — message plus formatted stack
+
+## Tuning capture depth
+
+The default depth (32) is plenty for most stacks. Override with
+`WithStackDepth`:
+
+```go
+ewrap.New("boom", ewrap.WithStackDepth(8))   // shallower
+ewrap.New("boom", ewrap.WithStackDepth(0))   // disable capture entirely
+ewrap.New("boom", ewrap.WithStackDepth(128)) // deeper
+```
+
+Setting depth to 0 returns a `*Error` with `len(err.stack) == 0` and an
+empty `Stack()`. Useful for hot-path errors you know will never need a
+trace.
+
+## Skipping helper frames
+
+If you call `New` or `Wrap` from a thin helper, the captured stack begins
+inside the helper rather than at the caller. Use the `Skip` variants to
+advance past those frames:
+
+```go
+func ErrInvalid(field string) *ewrap.Error {
+    return ewrap.NewSkip(1, "invalid input").
+        WithMetadata("field", field)
+}
+
+return ErrInvalid("email") // stack starts at the caller of ErrInvalid
+```
+
+`WrapSkip` is the wrap analogue:
+
+```go
+func wrapDB(err error, msg string) *ewrap.Error {
+    return ewrap.WrapSkip(1, err, msg)
 }
 ```
 
-## Using Stack Traces for Debugging
+## How wrap chains compose
 
-Stack traces are most valuable when combined with other error context. Here's a comprehensive example:
+Each `Wrap` captures its own stack, so deep chains don't lose information:
 
 ```go
-func debugError(err error) {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        fmt.Printf("Error Message: %v\n", wrappedErr.Error())
+root  := io.EOF
+inner := ewrap.Wrap(root, "ping db")  // stack A
+outer := ewrap.Wrap(inner, "boot")    // stack B
 
-        // Print the stack trace
-        fmt.Printf("\nStack Trace:\n%s\n", wrappedErr.Stack())
+outer.Stack() // shows where outer was created
+inner.Stack() // shows where inner was created
+```
 
-        // Get any metadata
-        if metadata, ok := wrappedErr.GetMetadata("request_id"); ok {
-            fmt.Printf("\nRequest ID: %v\n", metadata)
-        }
+To assemble a full multi-layer trace, walk the chain:
 
-        // Print error chain
-        fmt.Println("\nError Chain:")
-        for e := wrappedErr; e != nil; e = e.Unwrap().(*ewrap.Error) {
-            fmt.Printf("- %s\n", e.Error())
-        }
+```go
+for cur := error(outer); cur != nil; cur = errors.Unwrap(cur) {
+    var ec *ewrap.Error
+    if errors.As(cur, &ec) {
+        fmt.Println("---")
+        fmt.Println(ec.Stack())
     }
 }
 ```
 
-## Best Practices for Stack Traces
+## Serialization
 
-1. **Keep Stack Traces Meaningful**
-
-    In service handlers, capture enough context without excessive detail:
-
-    ```go
-    func (s *Service) HandleRequest(ctx context.Context, req Request) error {
-        // Capture high-level service context
-        if err := s.processRequest(ctx, req); err != nil {
-            return ewrap.Wrap(err, "request processing failed",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError))
-        }
-        return nil
-    }
-    ```
-
-1. **Combine with Logging**
-
-    Integrate stack traces with your logging system:
-
-    ```go
-    func logError(err error, logger Logger) {
-        if wrappedErr, ok := err.(*ewrap.Error); ok {
-            logger.Error("operation failed",
-                "error", wrappedErr.Error(),
-                "stack", wrappedErr.Stack(),
-                "type", ewrap.GetErrorType(wrappedErr))
-        }
-    }
-    ```
-
-1. **Use in Development and Testing**
-
-    Stack traces are particularly valuable during development and testing:
-
-    ```go
-    func TestComplexOperation(t *testing.T) {
-        err := performComplexOperation()
-        if err != nil {
-            t.Errorf("Operation failed with stack trace:\n%+v", err)
-        }
-    }
-    ```
-
-## Common Pitfalls and Solutions
-
-1. **Stack Trace Depth**
-
-    If you're seeing too much or too little information:
-
-    ```go
-    // Too much information
-    err := ewrap.New("operation failed")
-
-    // Just right - wrap with context
-    err := ewrap.New("operation failed",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError)).
-        WithMetadata("operation", "user_update")
-    ```
-
-1. **Missing Context**
-
-Ensure you're capturing relevant context with your stack traces:
+`(*Error).ToJSON` includes the formatted stack by default; pass
+`WithStackTrace(false)` to omit it:
 
 ```go
-func handleRequest(ctx context.Context, req *Request) error {
-    if err := validateRequest(req); err != nil {
-        // Include request context with the stack trace
-        return ewrap.Wrap(err, "invalid request",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)).
-            WithMetadata("request_id", req.ID).
-            WithMetadata("user_id", req.UserID)
-    }
-    return nil
-}
+jsonStr, _ := err.ToJSON(ewrap.WithStackTrace(false))
 ```
+
+For `ErrorGroup`, each member's stack frames serialize as a typed
+`[]StackFrame` slice (`stack_trace` field) — easy to render in dashboards.
+
+## Performance
+
+| Operation | ns/op | allocs |
+| --- | ---: | ---: |
+| `runtime.Callers` (depth 32) | ~860 | 1 |
+| `Stack()` first call (formatting + filter) | ~2,500 | 1 |
+| `Stack()` cached call | **1.7** | **0** |
+
+Capture happens once at construction. Formatting is paid once per error.
+After that, `Stack()`, `%+v`, and `LogValue` all read the cached string.
+
+## Internal frame filter
+
+The filter recognises a frame as ewrap-internal when:
+
+1. The function path starts with `runtime.`, **or**
+2. The function path starts with `github.com/hyp3rd/ewrap.` AND the file
+   does NOT end in `_test.go`.
+
+That second clause keeps ewrap's own tests visible in their own traces
+(useful for debugging the library) while hiding the library's machinery
+from end-user code.
+
+If you fork ewrap under a different module path, update the prefix in
+`isInternalFrame` (see [errors.go](https://github.com/hyp3rd/ewrap/blob/main/errors.go)).

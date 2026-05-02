@@ -36,9 +36,7 @@ func WithRetry(maxAttempts int, delay time.Duration, opts ...RetryOption) Option
 			opt(retryInfo)
 		}
 
-		err.mu.Lock()
-		err.metadata["retry_info"] = retryInfo
-		err.mu.Unlock()
+		err.retry = retryInfo
 	}
 }
 
@@ -52,13 +50,11 @@ func WithRetryShould(fn func(error) bool) RetryOption {
 }
 
 // defaultShouldRetry is the default retry decision function.
+// Validation errors are not retried by default.
 func defaultShouldRetry(err error) bool {
-	// Don't retry validation errors
 	var wrappedErr *Error
-	if errors.As(err, &wrappedErr) {
-		if ctx, ok := wrappedErr.metadata["error_context"].(*ErrorContext); ok {
-			return ctx.Type != ErrorTypeValidation
-		}
+	if errors.As(err, &wrappedErr) && wrappedErr.errorContext != nil {
+		return wrappedErr.errorContext.Type != ErrorTypeValidation
 	}
 
 	return true
@@ -67,10 +63,10 @@ func defaultShouldRetry(err error) bool {
 // CanRetry checks if the error can be retried.
 func (e *Error) CanRetry() bool {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
+	retryInfo := e.retry
+	e.mu.RUnlock()
 
-	retryInfo, ok := e.metadata["retry_info"].(*RetryInfo)
-	if !ok {
+	if retryInfo == nil {
 		return false
 	}
 
@@ -83,8 +79,10 @@ func (e *Error) IncrementRetry() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if retryInfo, ok := e.metadata["retry_info"].(*RetryInfo); ok {
-		retryInfo.CurrentAttempt++
-		retryInfo.LastAttempt = time.Now()
+	if e.retry == nil {
+		return
 	}
+
+	e.retry.CurrentAttempt++
+	e.retry.LastAttempt = time.Now()
 }

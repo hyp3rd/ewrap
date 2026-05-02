@@ -1,116 +1,96 @@
 # ewrap Documentation
 
-Welcome to the documentation for `ewrap`, a sophisticated, modern error handling library for Go applications that provides comprehensive error management with advanced features, observability hooks, and seamless integration with Go 1.25+ features.
+`ewrap` is a lightweight, modern Go error library: rich context, stack traces,
+structured serialization, `slog` and `fmt.Formatter` integration, HTTP / retry
+classification, PII-safe logging, and an opt-in circuit breaker — all in a
+tight dependency footprint (yaml + a fast JSON encoder, nothing else).
 
-## Overview
+## Highlights
 
-ewrap is designed to make error handling in Go applications more robust, informative, and maintainable. It provides a rich set of features while maintaining excellent performance characteristics through careful optimization, efficient memory management, and modern Go language features.
+- **Stdlib-first.** Two direct deps in the core module: `gopkg.in/yaml.v3` for
+  YAML, `github.com/goccy/go-json` for the serialization hot path.
+- **Correct by default.** `errors.Is` / `errors.As` work via `Unwrap()`; `Newf`
+  honors `%w`; every wrap captures its own stack frames.
+- **Lazy & cached hot paths.** Lazy metadata map; `Error()` and `Stack()`
+  cached via `sync.Once`. After the first call, `Stack()` is ~1.7 ns/op,
+  zero allocations.
+- **Modern Go integrations.** `(*Error).Format` for `%+v`; `(*Error).LogValue`
+  for `slog`; `errors.Join`-aware `ErrorGroup`.
+- **Operational features.** HTTP status, retryable / `Temporary()`
+  classification, safe (PII-redacted) messages, recovery suggestions,
+  structured `ErrorContext`.
+- **Opt-in subpackages.** Circuit breaker lives in `ewrap/breaker`; `slog`
+  adapter in `ewrap/slog`. Importing `ewrap` alone pulls in only the core.
 
-### Key Features
-
-- **Advanced Stack Traces**: Programmatic stack frame inspection with iterators and structured access
-- **Smart Error Wrapping**: Maintains error chains with unified context handling and metadata preservation
-- **Modern Logging Integration**: Support for slog (Go 1.21+), logrus, zap, zerolog with structured output
-- **Observability Hooks**: Built-in metrics and tracing for error frequencies and circuit-breaker states
-- **Go 1.25+ Optimizations**: Uses `maps.Clone` and `slices.Clone` for efficient copying operations
-- **Pool-based Error Groups**: Memory-efficient error aggregation with `errors.Join` compatibility
-- **Circuit Breaker Pattern**: Protect systems from cascading failures with state transition monitoring
-- **Custom Retry Logic**: Configurable per-error retry strategies with `RetryInfo` extension
-- **Recovery Guidance**: Integrated recovery suggestions in error output and logging
-- **Structured Serialization**: JSON/YAML export with full error group serialization
-- **Thread-Safe Operations**: Zero-allocation hot paths with minimal contention
-- **Type-Safe Metadata**: Optional generics support for strongly typed error contexts
-
-## Quick Example
-
-Here's a comprehensive example showcasing the modern features of ewrap:
+## Quick example
 
 ```go
+package main
+
+import (
+    "context"
+    "log/slog"
+    "net/http"
+    "os"
+    "time"
+
+    "github.com/hyp3rd/ewrap"
+    "github.com/hyp3rd/ewrap/breaker"
+    ewrapslog "github.com/hyp3rd/ewrap/slog"
+)
+
 func processOrder(ctx context.Context, orderID string) error {
-    // Set up observability
-    observer := &MyObserver{metricsClient: metrics, tracer: trace}
+    logger := ewrapslog.New(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-    // Get an error group from the pool with errors.Join support
-    pool := ewrap.NewErrorGroupPool(4)
-    eg := pool.Get()
-    defer eg.Release()
-
-    // Create a circuit breaker with observability hooks
-    cb := ewrap.NewCircuitBreaker("payment-service", 5, time.Minute*2,
-        ewrap.WithObserver(observer))
-
-    // Add validation errors with recovery suggestions
-    if err := validateOrder(orderID); err != nil {
-        eg.Add(ewrap.Wrap(err, "invalid order",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError),
-            ewrap.WithRecoverySuggestion("Validate order format and required fields"),
-            ewrap.WithLogger(slogLogger)))
+    cb := breaker.New("payments", 5, 30*time.Second)
+    if !cb.CanExecute() {
+        return ewrap.New("payments breaker open",
+            ewrap.WithRetryable(true),
+            ewrap.WithLogger(logger))
     }
 
-    // Handle database operations with custom retry logic
-    shouldRetry := func(err error, attempt int) bool {
-        return attempt < 3 && ewrap.IsType(err, ewrap.ErrorTypeNetwork)
+    if err := charge(ctx, orderID); err != nil {
+        cb.RecordFailure()
+
+        return ewrap.Wrap(err, "charging customer",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError),
+            ewrap.WithHTTPStatus(http.StatusBadGateway),
+            ewrap.WithRetryable(true),
+            ewrap.WithSafeMessage("charge failed"),
+            ewrap.WithLogger(logger),
+        ).
+            WithMetadata("order_id", orderID)
     }
 
-    if !eg.HasErrors() && cb.CanExecute() {
-        if err := saveToDatabase(orderID); err != nil {
-            cb.RecordFailure()
-            dbErr := ewrap.Wrap(err, "database operation failed",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
-                ewrap.WithRetryInfo(3, time.Second*5, shouldRetry),
-                ewrap.WithRecoverySuggestion("Check database connectivity and connection pool"))
-
-            // Inspect stack frames programmatically
-            if iterator := dbErr.GetStackIterator(); iterator.HasNext() {
-                frame := iterator.Next()
-                // Custom handling based on stack frame information
-                handleCriticalFrame(frame)
-            }
-
-            return dbErr
-        }
-        cb.RecordSuccess()
-    }
-
-    // Use errors.Join compatibility for standard library integration
-    if err := eg.Join(); err != nil {
-        // Serialize the entire error group for structured logging
-        if jsonOutput, serErr := eg.ToJSON(ewrap.WithTimestampFormat(time.RFC3339)); serErr == nil {
-            structuredLogger.Error("order processing failed", "errors", jsonOutput)
-        }
-        return err
-    }
+    cb.RecordSuccess()
 
     return nil
 }
 ```
 
-## Getting Started
-
-To start using ewrap in your project, visit the [Installation](getting-started/installation.md) guide, followed by the [Quick Start](getting-started/quickstart.md) tutorial.
+This example uses every subsystem: structured logging, the `breaker`
+subpackage, classification (`HTTPStatus`, `Retryable`), PII redaction
+(`SafeMessage`), and metadata.
 
 ## Why ewrap
 
-ewrap was created to address common challenges in modern Go error handling:
+| Need | What ewrap provides |
+| --- | --- |
+| Wrap with stack traces | `New`, `Wrap`, `Newf` (`%w`-aware), `Wrapf` |
+| Structured cause chain | `Unwrap()`; `errors.Is/As` work as you'd expect |
+| Pretty stack output | `fmt.Printf("%+v", err)` via `fmt.Formatter` |
+| Structured logging | `slog.LogValuer` exposes typed fields automatically |
+| Multi-error aggregation | `ErrorGroup` (pooled) + `errors.Join` |
+| HTTP / retry policy | `WithHTTPStatus` / `WithRetryable` + walkers |
+| PII-safe logs | `WithSafeMessage` / `(*Error).SafeError()` |
+| Cascade protection | `breaker` subpackage (no extra deps for non-users) |
+| Transport | `ToJSON`, `ToYAML` walk both `*Error` and standard chains |
 
-### Traditional Challenges Solved
+## Next steps
 
-1. **Context Loss**: Traditional error handling often loses important context during error propagation
-1. **Performance Overhead**: Many error handling libraries introduce significant memory and CPU overhead
-1. **Memory Management**: Poor memory management in error handling leads to increased GC pressure
-1. **Inconsistent Logging**: Different parts of applications handle error logging differently
-1. **Missing Stack Traces**: Getting meaningful, filterable stack traces is challenging
-1. **Circuit Breaking**: Protecting systems from cascading failures requires complex implementation
-
-### Modern Go Challenges Addressed
-
-1. **Go 1.25+ Feature Integration**: Lack of libraries leveraging modern Go performance features
-1. **Observability Gaps**: Missing built-in support for metrics and tracing in error handling
-1. **Recovery Guidance**: Errors without actionable remediation suggestions
-1. **Type Safety**: Metadata handling without compile-time guarantees
-1. **Standard Library Integration**: Poor integration with `errors.Join` and modern error patterns
-1. **Serialization Complexity**: Difficulty in structured error export for monitoring systems
-
-ewrap provides solutions to all these challenges while maintaining backward compatibility and excellent performance characteristics.
-
-ewrap solves these challenges while maintaining excellent performance characteristics and providing a clean, intuitive API.
+- [Installation](getting-started/installation.md)
+- [Quick Start](getting-started/quickstart.md)
+- [Error Creation](features/error-creation.md) and [Wrapping](features/error-wrapping.md)
+- [HTTP / Retry / Safe operational features](features/operational.md)
+- [Circuit breaker subpackage](features/circuit-breaker.md)
+- [API Reference](api/overview.md)

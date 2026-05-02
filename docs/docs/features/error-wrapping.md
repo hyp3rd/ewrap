@@ -1,53 +1,24 @@
 # Error Wrapping
 
-Error wrapping is a powerful feature that allows you to add context to errors as they propagate through your application. Understanding how to effectively wrap errors can significantly improve your application's debuggability and error handling capabilities.
+`Wrap` and `Wrapf` add a layer of context to an existing error while
+preserving the cause chain. Each wrap captures its own stack frames, and
+inherited metadata stays attached so log records remain useful all the way
+out.
 
-## Understanding Error Wrapping
-
-When an error occurs deep in your application's call stack, it often needs to pass through several layers before being handled. Each layer might need to add its own context to the error, helping to tell the complete story of what went wrong.
-
-Consider this scenario:
-
-```go
-func getUserProfile(userID string) (*Profile, error) {
-    // Low level database error occurs
-    data, err := db.Query("SELECT * FROM users WHERE id = ?", userID)
-    if err != nil {
-        // We wrap the database error with our context
-        return nil, ewrap.Wrap(err, "failed to fetch user data",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
-    }
-
-    // Error occurs during data processing
-    profile, err := parseUserData(data)
-    if err != nil {
-        // We wrap the parsing error with additional context
-        return nil, ewrap.Wrap(err, "failed to parse user profile",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError)).
-            WithMetadata("user_id", userID)
-    }
-
-    return profile, nil
-}
-```
-
-## The Wrap Function
-
-The `Wrap` function is the primary tool for error wrapping. It preserves the original error while adding new context:
+## Signature
 
 ```go
 func Wrap(err error, msg string, opts ...Option) *Error
+func Wrapf(err error, format string, args ...any) *Error
 ```
 
-The function takes:
+Both return `nil` if `err` is `nil`, so you can call them unconditionally:
 
-- The original error
-- A message describing what went wrong at this level
-- Optional configuration options
+```go
+return ewrap.Wrap(maybeErr, "syncing replicas") // nil-safe
+```
 
-### Basic Usage
-
-Here's a simple example of error wrapping:
+## Basic usage
 
 ```go
 if err := validateInput(data); err != nil {
@@ -55,201 +26,148 @@ if err := validateInput(data); err != nil {
 }
 ```
 
-### Adding Context While Wrapping
+The returned `*Error`:
 
-You can add rich context while wrapping errors:
+- Has its own `Error()` text: `"input validation failed: <inner.Error()>"`.
+- Holds the inner error as its `Cause()`, so `errors.Unwrap`, `errors.Is`,
+  and `errors.As` walk through it.
+- Captures a fresh stack at the wrap site.
+
+## Stack semantics
 
 ```go
-if err := processPayment(amount); err != nil {
-    return ewrap.Wrap(err, "payment processing failed",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityCritical),
-        ewrap.WithLogger(logger)).
-        WithMetadata("amount", amount).
-        WithMetadata("currency", "USD").
-        WithMetadata("processor", "stripe")
+root := db.Ping()                    // io error from net/http
+inner := ewrap.Wrap(root, "ping db") // captures wrap site A
+outer := ewrap.Wrap(inner, "boot")   // captures wrap site B
+
+inner.Stack() // shows where Wrap was called for `inner`
+outer.Stack() // shows where Wrap was called for `outer`
+```
+
+`outer.Stack()` and `inner.Stack()` are independent. To see the full
+chain in one shot, use the verbose verb:
+
+```go
+fmt.Printf("%+v\n", outer)
+// outer message
+// stack of outer
+```
+
+If you need the inner's frames too, walk the chain:
+
+```go
+for cur := error(outer); cur != nil; cur = errors.Unwrap(cur) {
+    var ec *ewrap.Error
+    if errors.As(cur, &ec) {
+        fmt.Println(ec.Stack())
+    }
 }
 ```
 
-## Error Chain Preservation
+## Wrapping inherits typed fields
 
-When you wrap an error, ewrap maintains the entire error chain. This means you can:
+When the inner error is a `*Error`, the wrapper inherits:
 
-- Access the original error
-- See all intermediate wrapping contexts
-- Understand the complete error path
+- `metadata` (cloned via `maps.Clone` so wrapper writes don't mutate the inner)
+- `errorContext`, `recovery`, `retry`
+- `observer`, `logger`
+- `httpStatus`, `retryable`
+
+You can override any of these by passing the corresponding option to `Wrap`.
+
+## Wrapping standard errors
 
 ```go
-func main() {
-    err := processUserRequest()
-    if err != nil {
-        // Print the full error chain
-        fmt.Println(err)
+ewrap.Wrap(io.EOF, "reading body")
+ewrap.Wrap(sql.ErrNoRows, "loading user")
+```
 
-        // Access the root cause
-        cause := errors.Unwrap(err)
+These work like any other wrap; `errors.Is(err, io.EOF)` returns `true`
+and serializers walk the cause chain via `errors.Unwrap`.
 
-        // Check if a specific error type exists in the chain
-        if errors.Is(err, sql.ErrNoRows) {
-            // Handle database not found case
-        }
-    }
+## `Wrapf` — formatted
+
+```go
+return ewrap.Wrapf(err, "loading row %d for tenant %s", id, tenantID)
+```
+
+If you need the wrapped error to participate in `%w` semantics, pass it
+through `Newf` instead, or wrap explicitly:
+
+```go
+ewrap.Newf("loading row %d: %w", id, dbErr)
+```
+
+## Adding context while wrapping
+
+```go
+return ewrap.Wrap(err, "payment processing failed",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityCritical),
+    ewrap.WithHTTPStatus(http.StatusBadGateway),
+    ewrap.WithRetryable(true),
+    ewrap.WithLogger(logger),
+).
+    WithMetadata("amount", amount).
+    WithMetadata("currency", "USD").
+    WithMetadata("processor", "stripe")
+```
+
+## Conditional wrapping
+
+```go
+err := db.Query(...)
+switch {
+case errors.Is(err, sql.ErrNoRows):
+    return ewrap.Wrap(err, "record not found",
+        ewrap.WithContext(ctx, ewrap.ErrorTypeNotFound, ewrap.SeverityWarning),
+        ewrap.WithHTTPStatus(http.StatusNotFound))
+case errors.Is(err, sql.ErrConnDone):
+    return ewrap.Wrap(err, "database connection lost",
+        ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
+        ewrap.WithRetryable(true))
+case err != nil:
+    return ewrap.Wrap(err, "database operation failed",
+        ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
 }
 ```
 
-## Formatted Wrapping with Wrapf
+## Wrapping inside helpers — `WrapSkip`
 
-For cases where you need to include formatted messages, use `Wrapf`:
+If you wrap inside a helper, the captured stack starts in the helper rather
+than at the call site:
 
 ```go
-func updateUser(userID string, fields map[string]any) error {
-    if err := db.Update(userID, fields); err != nil {
-        return ewrap.Wrapf(err, "failed to update user %s", userID)
-    }
-    return nil
+func wrapDB(err error, msg string) *ewrap.Error {
+    // BAD: stack starts here
+    return ewrap.Wrap(err, msg, ewrap.WithContext(...))
 }
 ```
 
-## Best Practices for Error Wrapping
-
-### 1. Add Meaningful Context
-
-Each wrap should add valuable information:
+Use `WrapSkip(skip, ...)` to advance past the helper frames:
 
 ```go
-// Good - adds specific context
-err = ewrap.Wrap(err, "failed to process monthly report for January 2024",
-    ewrap.WithMetadata("report_type", "monthly"),
-    ewrap.WithMetadata("period", "2024-01"))
-
-// Not as helpful - too generic
-err = ewrap.Wrap(err, "processing failed")
-```
-
-### 2. Preserve Error Types
-
-Choose error types that make sense for the current context:
-
-```go
-func validateAndSaveUser(user User) error {
-    err := validateUser(user)
-    if err != nil {
-        // Preserve validation error type
-        return ewrap.Wrap(err, "user validation failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError))
-    }
-
-    err = saveUser(user)
-    if err != nil {
-        // Use database error type for storage issues
-        return ewrap.Wrap(err, "failed to save user",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
-    }
-
-    return nil
+func wrapDB(err error, msg string) *ewrap.Error {
+    return ewrap.WrapSkip(1, err, msg, ewrap.WithContext(...))
 }
 ```
 
-### 3. Use Appropriate Granularity
+The same pattern works for `New` via `NewSkip`.
 
-Balance between too much and too little information:
+## Best practices
 
-```go
-func processOrder(order Order) error {
-    // Wrap high-level business operations
-    if err := validateOrder(order); err != nil {
-        return ewrap.Wrap(err, "order validation failed")
-    }
+- **One wrap per layer.** Don't wrap the same error twice in the same
+  function; that just doubles the message.
+- **Add information, not noise.** A useful wrap message points at *what
+  this layer was doing*, not just that it failed.
+- **Use `errors.Is/As` for branching, not string matching** on the rendered
+  message.
+- **Don't wrap simple validation errors** in tight loops if you don't add
+  context — return the inner error directly.
 
-    // Don't wrap every small utility function
-    total := calculateTotal(order.Items)
+## Performance
 
-    // Wrap significant state transitions or external calls
-    if err := chargeCustomer(order.CustomerID, total); err != nil {
-        return ewrap.Wrap(err, "payment processing failed",
-            ewrap.WithMetadata("amount", total),
-            ewrap.WithMetadata("customer_id", order.CustomerID))
-    }
-
-    return nil
-}
-```
-
-### 4. Consider Performance
-
-While error wrapping is lightweight, be mindful in hot paths:
-
-```go
-func processItems(items []Item) error {
-    for _, item := range items {
-        // In tight loops, consider if wrapping is necessary
-        if err := validateItem(item); err != nil {
-            return err  // Maybe don't wrap simple validation errors
-        }
-
-        // Do wrap significant errors
-        if err := processItem(item); err != nil {
-            return ewrap.Wrap(err, "item processing failed",
-                ewrap.WithMetadata("item_id", item.ID))
-        }
-    }
-    return nil
-}
-```
-
-## Advanced Error Wrapping
-
-### Conditional Wrapping
-
-Sometimes you might want to wrap errors differently based on their type:
-
-```go
-func handleDatabaseOperation() error {
-    err := db.Query()
-    if err != nil {
-        switch {
-        case errors.Is(err, sql.ErrNoRows):
-            return ewrap.Wrap(err, "record not found",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeNotFound, ewrap.SeverityWarning))
-        case errors.Is(err, sql.ErrConnDone):
-            return ewrap.Wrap(err, "database connection lost",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
-        default:
-            return ewrap.Wrap(err, "database operation failed",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
-        }
-    }
-    return nil
-}
-```
-
-### Multi-Level Wrapping
-
-For complex operations, you might wrap errors multiple times:
-
-```go
-func processUserOrder(ctx context.Context, userID, orderID string) error {
-    user, err := getUser(userID)
-    if err != nil {
-        return ewrap.Wrap(err, "failed to get user",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
-    }
-
-    order, err := getOrder(orderID)
-    if err != nil {
-        return ewrap.Wrap(err, "failed to get order",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
-    }
-
-    if err := validateUserCanAccessOrder(user, order); err != nil {
-        return ewrap.Wrap(err, "user not authorized to access order",
-            ewrap.WithContext(ctx, ewrap.ErrorTypePermission, ewrap.SeverityWarning))
-    }
-
-    if err := processOrderPayment(order); err != nil {
-        return ewrap.Wrap(err, "order payment failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityCritical))
-    }
-
-    return nil
-}
-```
+- A single `Wrap` allocates the `*Error` struct plus the stack PCs slice
+  (~2 allocations).
+- Inherited metadata is cloned shallowly via `maps.Clone`.
+- `(*Error).Error()` and `Stack()` are cached on first call; subsequent
+  reads on the wrapped error are lock-free.

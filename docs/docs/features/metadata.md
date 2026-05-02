@@ -1,275 +1,162 @@
-# Error Metadata
+# Metadata
 
-Metadata is additional information attached to errors that provides crucial context for debugging and error handling. Think of metadata as tags or labels that give you deeper insight into what was happening when an error occurred. In ewrap, metadata is implemented as a flexible key-value store that travels with the error through your application.
+ewrap separates **user metadata** (a string-keyed map you control) from
+**reserved typed fields** (`ErrorContext`, `RecoverySuggestion`,
+`RetryInfo`). Each lives in its own slot so a stray `WithMetadata` key
+can't silently overwrite the structured fields.
 
-## Understanding Error Metadata
+## User metadata
 
-When an error occurs, the error message alone often doesn't tell the complete story. For example, if a database query fails, you might want to know:
-
-- What query was being executed?
-- How long did it take before failing?
-- What parameters were used?
-- How many retries were attempted?
-
-Metadata allows you to capture all this contextual information in a structured way.
-
-## Basic Metadata Usage
-
-Let's start with the fundamentals of adding and retrieving metadata:
+Use `WithMetadata` to attach arbitrary key/value data:
 
 ```go
-func processUserOrder(userID string, orderID string) error {
-    err := processOrder(orderID)
-    if err != nil {
-        return ewrap.Wrap(err, "failed to process order").
-            WithMetadata("user_id", userID).
-            WithMetadata("order_id", orderID).
-            WithMetadata("timestamp", time.Now()).
-            WithMetadata("attempt", 1)
-    }
-    return nil
-}
+err := ewrap.New("checkout failed").
+    WithMetadata("order_id", orderID).
+    WithMetadata("attempt", 2).
+    WithMetadata("provider", "stripe")
 ```
 
-Retrieving metadata is just as straightforward:
+Read it back with `GetMetadata`:
 
 ```go
-func handleError(err error) {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Get specific metadata values
-        if userID, exists := wrappedErr.GetMetadata("user_id"); exists {
-            fmt.Printf("Error occurred for user: %v\n", userID)
-        }
-
-        // Log all metadata for debugging
-        if timestamp, exists := wrappedErr.GetMetadata("timestamp"); exists {
-            fmt.Printf("Error occurred at: %v\n", timestamp)
-        }
-    }
-}
+val, ok := err.GetMetadata("order_id")
 ```
 
-## Structured Metadata Patterns
-
-While metadata values can be of any type, it's often helpful to use structured data for complex information:
+Or with the generic, type-checked variant:
 
 ```go
-type QueryMetadata struct {
-    SQL        string
-    Parameters []any
-    Duration   time.Duration
-    Table      string
-}
-
-func executeQuery(query string, params ...any) error {
-    start := time.Now()
-
-    result, err := db.Exec(query, params...)
-    if err != nil {
-        queryMeta := QueryMetadata{
-            SQL:        query,
-            Parameters: params,
-            Duration:   time.Since(start),
-            Table:      extractTableName(query),
-        }
-
-        return ewrap.Wrap(err, "database query failed").
-            WithMetadata("query_info", queryMeta).
-            WithMetadata("query_attempt", 1)
-    }
-
-    return nil
-}
+attempt, ok := ewrap.GetMetadataValue[int](err, "attempt")
+provider, ok := ewrap.GetMetadataValue[string](err, "provider")
 ```
 
-## Dynamic Metadata Collection
+`GetMetadataValue` returns the zero value of `T` and `false` if the key is
+missing or the stored value isn't of type `T`.
 
-Sometimes you need to build metadata progressively as an operation proceeds:
+### Lazy allocation
+
+The metadata map is **not allocated until the first write**. An error that
+never gets metadata pays nothing for the field beyond the nil slice header.
+
+### Concurrent reads and writes
+
+`WithMetadata`, `GetMetadata`, and `GetMetadataValue` are protected by a
+`sync.RWMutex`, so concurrent use across goroutines is safe.
+
+## Reserved typed fields
+
+These slots have dedicated options and accessors. They never appear in the
+user metadata map.
+
+### `ErrorContext`
+
+Captured via `WithContext(ctx, type, severity)`:
 
 ```go
-func processComplexOperation(ctx context.Context, data []byte) error {
-    // Create error with initial metadata
-    err := ewrap.New("starting complex operation",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityInfo)).
-        WithMetadata("start_time", time.Now()).
-        WithMetadata("data_size", len(data))
+err := ewrap.New("payment failed",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError))
 
-    // Process stages and collect metadata
-    stages := []string{"validation", "transformation", "storage"}
-    metrics := make(map[string]time.Duration)
-
-    for _, stage := range stages {
-        stageStart := time.Now()
-
-        if err := processStage(stage, data); err != nil {
-            // Add stage-specific metadata to error
-            return ewrap.Wrap(err, fmt.Sprintf("%s stage failed", stage)).
-                WithMetadata("failed_stage", stage).
-                WithMetadata("stage_metrics", metrics).
-                WithMetadata("stage_duration", time.Since(stageStart))
-        }
-
-        metrics[stage] = time.Since(stageStart)
-    }
-
-    return nil
-}
+ec := err.GetErrorContext()
+// ec.Type, ec.Severity, ec.RequestID, ec.User, ec.Operation, ec.Component,
+// ec.Environment, ec.Timestamp, ec.File, ec.Line, ec.Data
 ```
 
-## Metadata for Debugging and Monitoring
+`WithContext` reads `request_id`, `user`, `operation`, and `component`
+out of the supplied `context.Context` if those keys are present.
 
-Metadata is particularly valuable for debugging and monitoring. Here's a pattern that combines metadata with logging:
+You can also attach a pre-built `ErrorContext` after construction:
 
 ```go
-type OperationTracker struct {
-    StartTime   time.Time
-    Steps      []string
-    Metrics    map[string]any
-    Attributes map[string]string
-}
-
-func NewOperationTracker() *OperationTracker {
-    return &OperationTracker{
-        StartTime:   time.Now(),
-        Steps:      make([]string, 0),
-        Metrics:    make(map[string]any),
-        Attributes: make(map[string]string),
-    }
-}
-
-func (ot *OperationTracker) AddStep(step string) {
-    ot.Steps = append(ot.Steps, step)
-}
-
-func (ot *OperationTracker) AddMetric(key string, value any) {
-    ot.Metrics[key] = value
-}
-
-func processWithTracking(ctx context.Context, data []byte) error {
-    tracker := NewOperationTracker()
-
-    // Track operation progress
-    err := func() error {
-        tracker.AddStep("initialization")
-
-        if err := validate(data); err != nil {
-            return ewrap.Wrap(err, "validation failed").
-                WithMetadata("tracker", tracker)
-        }
-        tracker.AddStep("validation")
-
-        if err := transform(data); err != nil {
-            return ewrap.Wrap(err, "transformation failed").
-                WithMetadata("tracker", tracker)
-        }
-        tracker.AddStep("transformation")
-
-        tracker.AddMetric("processing_time", time.Since(tracker.StartTime))
-        return nil
-    }()
-
-    if err != nil {
-        return ewrap.Wrap(err, "operation failed").
-            WithMetadata("final_state", tracker)
-    }
-
-    return nil
-}
+err.WithContext(&ewrap.ErrorContext{Type: ewrap.ErrorTypeNetwork})
 ```
 
-## Metadata Best Practices
-
-### 1. Keep Metadata Serializable
-
-Ensure your metadata can be properly serialized when needed:
+### `RecoverySuggestion`
 
 ```go
-// Good - uses simple types
-err = ewrap.New("processing failed").
-    WithMetadata("count", 42).
-    WithMetadata("status", "incomplete")
+err := ewrap.New("DB unreachable",
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message:       "Check connectivity and pool sizing.",
+        Actions:       []string{"reset pool", "verify network"},
+        Documentation: "https://runbooks.example.com/db",
+    }))
 
-// Better - uses structured data that can be serialized
-type ProcessMetadata struct {
-    Count    int    `json:"count"`
-    Status   string `json:"status"`
-    Duration string `json:"duration"`
-}
-
-meta := ProcessMetadata{
-    Count:    42,
-    Status:   "incomplete",
-    Duration: time.Since(start).String(),
-}
-
-err = ewrap.New("processing failed").
-    WithMetadata("process_info", meta)
+rs := err.Recovery()
 ```
 
-### 2. Use Consistent Keys
+When the error is logged via `(*Error).Log`, the recovery suggestion is
+emitted as `recovery_message`, `recovery_actions`, and
+`recovery_documentation` fields.
 
-Maintain consistent metadata keys across your application:
+### `RetryInfo`
 
 ```go
-// Define common metadata keys as constants
-const (
-    MetaKeyUserID      = "user_id"
-    MetaKeyRequestID   = "request_id"
-    MetaKeyDuration    = "duration"
-    MetaKeyRetryCount  = "retry_count"
-)
+err := ewrap.New("upstream timeout",
+    ewrap.WithRetry(3, 5*time.Second))
 
-func processRequest(ctx context.Context, userID string) error {
-    requestID := ctx.Value("request_id").(string)
-    start := time.Now()
-
-    err := performOperation()
-    if err != nil {
-        return ewrap.Wrap(err, "operation failed").
-            WithMetadata(MetaKeyUserID, userID).
-            WithMetadata(MetaKeyRequestID, requestID).
-            WithMetadata(MetaKeyDuration, time.Since(start))
-    }
-    return nil
-}
+ri := err.Retry() // *RetryInfo, or nil if not set
+err.CanRetry()    // checks attempts vs ShouldRetry predicate
+err.IncrementRetry()
 ```
 
-### 3. Structure Complex Data
-
-For complex metadata, use structured types:
+Customise the retry predicate:
 
 ```go
-type HTTPRequestMetadata struct {
-    Method      string
-    URL         string
-    StatusCode  int
-    Duration    time.Duration
-    Headers     map[string][]string
-}
-
-func makeAPICall(ctx context.Context, req *http.Request) error {
-    start := time.Now()
-    resp, err := http.DefaultClient.Do(req)
-
-    requestMeta := HTTPRequestMetadata{
-        Method:   req.Method,
-        URL:      req.URL.String(),
-        Duration: time.Since(start),
-    }
-
-    if err != nil {
-        return ewrap.Wrap(err, "API call failed").
-            WithMetadata("request_details", requestMeta)
-    }
-
-    requestMeta.StatusCode = resp.StatusCode
-    requestMeta.Headers = resp.Header
-
-    if resp.StatusCode >= 400 {
-        return ewrap.New("API returned error status").
-            WithMetadata("request_details", requestMeta)
-    }
-
-    return nil
-}
+err := ewrap.New("rate limited",
+    ewrap.WithRetry(5, 2*time.Second,
+        ewrap.WithRetryShould(func(e error) bool {
+            return ewrap.IsRetryable(e)
+        })))
 ```
+
+The default predicate returns `true` unless the error's `ErrorContext.Type`
+is `ErrorTypeValidation`.
+
+## Why typed fields?
+
+The previous design stored these under reserved string keys
+(`"error_context"`, `"recovery_suggestion"`, `"retry_info"`) in the same
+map as user metadata. That made it possible — and easy — to silently
+corrupt them with a stray `WithMetadata("error_context", ...)` call.
+
+Lifting them to typed fields:
+
+- Eliminates that footgun.
+- Makes the API self-documenting — the type system shows exactly what a
+  recovery suggestion looks like.
+- Avoids the runtime cost of a type assertion on every read.
+
+## Inheritance through `Wrap`
+
+When `Wrap` is given a `*Error`, the wrapper inherits **all** typed fields
+plus a clone of the metadata map:
+
+```go
+inner := ewrap.New("DB error",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
+    ewrap.WithRetryable(true)).
+    WithMetadata("query", q)
+
+outer := ewrap.Wrap(inner, "loading user")
+
+outer.GetErrorContext()           // inherited
+outer.Retryable()                 // inherited
+outer.GetMetadata("query")        // inherited via maps.Clone
+```
+
+Pass an option to `Wrap` to override:
+
+```go
+outer := ewrap.Wrap(inner, "loading user",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeNotFound, ewrap.SeverityWarning))
+```
+
+## Cheat sheet
+
+| Concept | Set with | Read with |
+| --- | --- | --- |
+| User metadata (untyped) | `WithMetadata(key, value)` | `GetMetadata(key)` / `GetMetadataValue[T]` |
+| Error context | `WithContext(ctx, type, sev)` option / `(*Error).WithContext(ec)` method | `GetErrorContext()` |
+| Recovery guidance | `WithRecoverySuggestion(rs)` | `Recovery()` |
+| Retry info | `WithRetry(max, delay, opts...)` | `Retry()` / `CanRetry()` / `IncrementRetry()` |
+| HTTP status | `WithHTTPStatus(code)` | `ewrap.HTTPStatus(err)` |
+| Retryable flag | `WithRetryable(bool)` | `(*Error).Retryable()` / `ewrap.IsRetryable(err)` |
+| Safe message | `WithSafeMessage(s)` | `(*Error).SafeError()` |

@@ -1,259 +1,219 @@
 # ewrap
 
-[![Go](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml/badge.svg)](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml) [![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://hyp3rd.github.io/ewrap/) [![Go Report Card](https://goreportcard.com/badge/github.com/hyp3rd/ewrap)](https://goreportcard.com/report/github.com/hyp3rd/ewrap) [![Go Reference](https://pkg.go.dev/badge/github.com/hyp3rd/ewrap.svg)](https://pkg.go.dev/github.com/hyp3rd/ewrap) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) ![GitHub Sponsors](https://img.shields.io/github/sponsors/hyp3rd)
+[![Go](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml/badge.svg)](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml)
+[![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://hyp3rd.github.io/ewrap/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hyp3rd/ewrap)](https://goreportcard.com/report/github.com/hyp3rd/ewrap)
+[![Go Reference](https://pkg.go.dev/badge/github.com/hyp3rd/ewrap.svg)](https://pkg.go.dev/github.com/hyp3rd/ewrap)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![GitHub Sponsors](https://img.shields.io/github/sponsors/hyp3rd)
 
-A sophisticated, modern error handling library for Go applications that provides comprehensive error management with advanced features, observability hooks, and seamless integration with Go 1.25+ features.
+A lightweight, modern Go error library: rich context, stack traces, structured
+serialization, `slog`/`fmt.Formatter` integration, HTTP/retry classification,
+PII-safe logging, and an opt-in circuit breaker — all in a tight dependency
+footprint (yaml + a fast JSON encoder, nothing else).
 
-## Core Features
+## Highlights
 
-### Error Management & Context
+- **Stdlib-first.** Two direct deps in the core module:
+  [`gopkg.in/yaml.v3`][yaml] for YAML,
+  [`github.com/goccy/go-json`][goccy] for the serialization hot path (~2.5× faster than `encoding/json`).
+- **Correct by default.** `errors.Is` / `errors.As` work via `Unwrap()`; `Newf` honors `%w`;
+  every wrap captures its own stack frames.
+- **Lazy & cached hot paths.** Lazy metadata map; `Error()` and `Stack()` cached via `sync.Once`.
+  After the first call, `Stack()` is ~1.7 ns/op, zero allocations.
+- **Modern Go integrations.** `(*Error).Format` for `%+v`; `(*Error).LogValue` for `slog`;
+  `errors.Join`-aware `ErrorGroup`.
+- **Operational features.** HTTP status, retryable / `Temporary()` classification, safe
+  (PII-redacted) messages, recovery suggestions, structured `ErrorContext`.
+- **Opt-in subpackages.** Circuit breaker lives in [`ewrap/breaker`](breaker); `slog` adapter
+  in [`ewrap/slog`](slog). Importing `ewrap` alone pulls in only the core.
 
-- **Advanced Stack Traces**: Programmatic stack frame inspection with iterators and structured access
-- **Smart Error Wrapping**: Maintains error chains with unified context handling and metadata preservation
-- **Rich Metadata**: Type-safe metadata attachment with optional generics support
-- **Context Integration**: Unified context handling preventing divergence between error context and metadata
+[yaml]: https://pkg.go.dev/gopkg.in/yaml.v3
+[goccy]: https://pkg.go.dev/github.com/goccy/go-json
 
-### Logging & Observability
-
-- **Modern Logging**: Support for slog (Go 1.21+), logrus, zap, zerolog with structured output
-- **Observability Hooks**: Built-in metrics and tracing for error frequencies and circuit-breaker states
-- **Recovery Guidance**: Integrated recovery suggestions in error output and logging
-
-### Performance & Efficiency
-
-- **Go 1.25+ Optimizations**: Uses `maps.Clone` and `slices.Clone` for efficient copying operations
-- **Pool-based Error Groups**: Memory-efficient error aggregation with `errors.Join` compatibility
-- **Thread-Safe Operations**: Zero-allocation hot paths with minimal contention
-- **Structured Serialization**: JSON/YAML export with full error group serialization
-
-### Advanced Features
-
-- **Circuit Breaker Pattern**: Protect systems from cascading failures with state transition monitoring
-- **Custom Retry Logic**: Configurable per-error retry strategies with `RetryInfo` extension
-- **Error Categorization**: Built-in types, severity levels, and optional generic type constraints
-- **Timestamp Formatting**: Proper timestamp formatting with customizable formats
-
-## Installation
+## Install
 
 ```bash
 go get github.com/hyp3rd/ewrap
 ```
 
-## Documentation
+Requires Go 1.25+ (uses `maps.Clone`, `slices.Clone`, range-over-int, `b.Loop`).
 
-`ewrap` provides comprehensive documentation covering all features and advanced usage patterns. Visit the [complete documentation](https://hyp3rd.github.io/ewrap/) for detailed guides, examples, and API reference.
-
-## Usage Examples
-
-### Basic Error Handling
-
-Create and wrap errors with context:
+## Quick tour
 
 ```go
-// Create a new error
+import "github.com/hyp3rd/ewrap"
+
+// Plain error with stack trace
 err := ewrap.New("database connection failed")
 
-// Wrap an existing error with context
-if err != nil {
-    return ewrap.Wrap(err, "failed to process request")
+// %w-aware formatted constructor
+err := ewrap.Newf("query %q failed: %w", q, ioErr) // errors.Is(err, ioErr) == true
+
+// Wrap preserves the inner cause AND captures the wrap site
+err := ewrap.Wrap(ioErr, "syncing replicas")
+
+// Nil-safe
+ewrap.Wrap(nil, "ignored") == nil
+ewrap.Wrapf(nil, "ignored %d", 42) == nil
+```
+
+### Rich context
+
+```go
+err := ewrap.New("payment authorization rejected",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError),
+    ewrap.WithHTTPStatus(http.StatusBadGateway),
+    ewrap.WithRetryable(true),
+    ewrap.WithSafeMessage("payment authorization rejected"), // omits PII
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message: "Inspect upstream provider's queue and retry after backoff.",
+        Documentation: "https://runbooks.example.com/payments/timeout",
+    }),
+).
+    WithMetadata("provider", "stripe").
+    WithMetadata("attempt", 2)
+
+err.Log() // emits structured fields via the configured Logger
+```
+
+### Stack traces
+
+```go
+fmt.Printf("%+v\n", err) // message + filtered stack via fmt.Formatter
+
+// Or inspect frames programmatically
+for it := err.GetStackIterator(); it.HasNext(); {
+    f := it.Next()
+    fmt.Printf("%s:%d %s\n", f.File, f.Line, f.Function)
 }
-
-err = ewrap.Newf("failed to process request id: %v", requestID)
 ```
 
-### Advanced Error Context with Unified Handling
+`Stack()` is computed once and cached. `WithStackDepth(n)` tunes capture; pass
+`0` to disable. `NewSkip` / `WrapSkip` add caller-skip when wrapping `New`/`Wrap`
+in helpers.
 
-Add rich context and metadata with the new unified context system:
+### Standard library compatibility
 
 ```go
-err := ewrap.New("operation failed",
-    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
-    ewrap.WithLogger(logger),
-    ewrap.WithRecoverySuggestion("Check database connection and retry")).
-    WithMetadata("query", "SELECT * FROM users").
-    WithMetadata("retry_count", 3).
-    WithMetadata("connection_pool_size", 10)
-
-// Log the error with all context and recovery suggestions
-err.Log()
+errors.Is(err, ioErr)  // walks the cause chain via Unwrap()
+errors.As(err, &netErr)
+errors.Unwrap(err)
+fmt.Errorf("layered: %w", err) // also walks correctly
 ```
 
-### Modern Error Groups with errors.Join Integration
-
-Use error groups efficiently with Go 1.25+ features:
+### Operational classification
 
 ```go
-// Create an error group pool with initial capacity
+ewrap.HTTPStatus(err)   // walks chain; 0 if unset
+ewrap.IsRetryable(err)  // checks ewrap classification, then stdlib Temporary()
+err.SafeError()         // redacted variant for external sinks
+err.Recovery()          // typed accessor for the recovery suggestion
+err.Retry()             // typed accessor for retry metadata
+err.GetErrorContext()   // typed ErrorContext or nil
+```
+
+### `slog` integration
+
+`*Error` implements `slog.LogValuer`, so `slog.Error("boom", "err", err)`
+emits the message, type, severity, component, request_id, metadata and
+cause as structured fields.
+
+For drivers that want an `ewrap.Logger`, the `slog` subpackage provides a
+3-line adapter:
+
+```go
+import (
+    stdslog "log/slog"
+    ewrapslog "github.com/hyp3rd/ewrap/slog"
+)
+
+logger := ewrapslog.New(stdslog.New(stdslog.NewJSONHandler(os.Stdout, nil)))
+err := ewrap.New("boom", ewrap.WithLogger(logger))
+```
+
+For zap, zerolog, logrus, glog, etc. — write a 5-line adapter against the
+`ewrap.Logger` interface (3 methods: `Error`, `Debug`, `Info`).
+
+### Error groups
+
+```go
 pool := ewrap.NewErrorGroupPool(4)
-
-// Get an error group from the pool
 eg := pool.Get()
-defer eg.Release()  // Return to pool when done
+defer eg.Release()
 
-// Add errors as needed
-eg.Add(err1)
-eg.Add(err2)
+eg.Add(validate(req))
+eg.Add(persist(req))
 
-// Use errors.Join compatibility for standard library integration
-if err := eg.Join(); err != nil {
+if err := eg.Join(); err != nil { // errors.Join semantics
     return err
 }
-
-// Or serialize the entire error group
-jsonOutput, _ := eg.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
 ```
 
-### Stack Frame Inspection and Iteration
+`(*ErrorGroup).ToJSON()` / `ToYAML()` recursively serialize the whole group,
+walking both `*Error` and standard wrapped chains so transport consumers
+keep full context.
 
-Programmatically inspect stack traces:
+### Circuit breaker
+
+The breaker is a sibling subpackage so consumers who only want errors don't
+pay for it.
 
 ```go
-if wrappedErr, ok := err.(*ewrap.Error); ok {
-    // Get a stack iterator for programmatic access
-    iterator := wrappedErr.GetStackIterator()
+import "github.com/hyp3rd/ewrap/breaker"
 
-    for iterator.HasNext() {
-        frame := iterator.Next()
-        fmt.Printf("Function: %s\n", frame.Function)
-        fmt.Printf("File: %s:%d\n", frame.File, frame.Line)
-        fmt.Printf("PC: %x\n", frame.PC)
-    }
+cb := breaker.New("payments", 5, 30*time.Second)
 
-    // Or get all frames at once
-    frames := wrappedErr.GetStackFrames()
-    for _, frame := range frames {
-        // Process each frame...
-    }
+if !cb.CanExecute() {
+    return ewrap.New("payments breaker open",
+        ewrap.WithRetryable(true))
 }
+
+if err := charge(req); err != nil {
+    cb.RecordFailure()
+
+    return ewrap.Wrap(err, "charging customer",
+        ewrap.WithHTTPStatus(http.StatusBadGateway))
+}
+
+cb.RecordSuccess()
 ```
 
-### Custom Retry Logic with Extended RetryInfo
-
-Configure per-error retry strategies:
+Observers receive transitions synchronously after the lock is released:
 
 ```go
-// Define custom retry logic
-shouldRetry := func(err error, attempt int) bool {
-    if attempt >= 5 {
-        return false
-    }
+type metrics struct{ /* ... */ }
 
-    // Custom logic based on error type
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        return wrappedErr.ErrorType() == ewrap.ErrorTypeNetwork
-    }
-    return false
+func (m *metrics) RecordTransition(name string, from, to breaker.State) {
+    m.gauge.WithLabelValues(name, to.String()).Inc()
 }
 
-// Create error with custom retry configuration
-err := ewrap.New("network timeout",
-    ewrap.WithRetryInfo(3, time.Second*2, shouldRetry))
-
-// Use the retry information
-if retryInfo := err.GetRetryInfo(); retryInfo != nil {
-    if retryInfo.ShouldRetry(err, currentAttempt) {
-        // Perform retry logic
-    }
-}
+cb := breaker.NewWithObserver("payments", 5, 30*time.Second, &metrics{})
 ```
 
-### Observability Hooks and Monitoring
+## Error types and severity
 
-Monitor error patterns and circuit breaker states:
+Pre-defined enums for categorization. Their `String()` form is what shows up
+in `ErrorOutput.Type` / `Severity`, JSON, and `slog` fields.
 
 ```go
-// Set up observability hooks
-observer := &MyObserver{
-    metricsClient: metricsClient,
-    tracer:       tracer,
-}
+ErrorTypeUnknown        // -> "unknown"
+ErrorTypeValidation     // -> "validation"
+ErrorTypeNotFound       // -> "not_found"
+ErrorTypePermission     // -> "permission"
+ErrorTypeDatabase       // -> "database"
+ErrorTypeNetwork        // -> "network"
+ErrorTypeConfiguration  // -> "configuration"
+ErrorTypeInternal       // -> "internal"
+ErrorTypeExternal       // -> "external"
 
-// Create circuit breaker with observability
-cb := ewrap.NewCircuitBreaker("payment-service", 5, time.Minute*2,
-    ewrap.WithObserver(observer))
-
-// The observer will receive notifications for:
-// - Error frequency changes
-// - Circuit breaker state transitions
-// - Recovery suggestions triggered
+SeverityInfo            // -> "info"
+SeverityWarning         // -> "warning"
+SeverityError           // -> "error"
+SeverityCritical        // -> "critical"
 ```
 
-### Circuit Breaker Pattern
-
-Protect your system from cascading failures:
-
-```go
-// Create a circuit breaker for database operations
-cb := ewrap.NewCircuitBreaker("database", 3, time.Minute)
-
-if cb.CanExecute() {
-    if err := performDatabaseOperation(); err != nil {
-        cb.RecordFailure()
-        return ewrap.Wrap(err, "database operation failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
-    }
-    cb.RecordSuccess()
-}
-```
-
-### Complete Example
-
-Here's a comprehensive example combining multiple features:
-
-```go
-func processOrder(ctx context.Context, orderID string) error {
-    // Get an error group from the pool
-    pool := ewrap.NewErrorGroupPool(4)
-    eg := pool.Get()
-    defer eg.Release()
-
-    // Create a circuit breaker for database operations
-    cb := ewrap.NewCircuitBreaker("database", 3, time.Minute)
-
-    // Validate order
-    if err := validateOrderID(orderID); err != nil {
-        eg.Add(ewrap.Wrap(err, "invalid order ID",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)))
-    }
-
-    if !eg.HasErrors() && cb.CanExecute() {
-        if err := saveToDatabase(orderID); err != nil {
-            cb.RecordFailure()
-            return ewrap.Wrap(err, "database operation failed",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
-        }
-        cb.RecordSuccess()
-    }
-
-    return eg.Error()
-}
-```
-
-## Error Types and Severity
-
-The package provides pre-defined error types and severity levels:
-
-```go
-// Error Types
-ErrorTypeValidation    // Input validation failures
-ErrorTypeNotFound      // Resource not found
-ErrorTypePermission    // Authorization/authentication failures
-ErrorTypeDatabase      // Database operation failures
-ErrorTypeNetwork       // Network-related failures
-ErrorTypeConfiguration // Configuration issues
-ErrorTypeInternal      // Internal system errors
-ErrorTypeExternal      // External service errors
-
-// Severity Levels
-SeverityInfo      // Informational messages
-SeverityWarning   // Warning conditions
-SeverityError     // Error conditions
-SeverityCritical  // Critical failures
-```
-
-## Logging Integration
-
-Implement the Logger interface to integrate with your logging system:
+## Logger interface
 
 ```go
 type Logger interface {
@@ -263,212 +223,67 @@ type Logger interface {
 }
 ```
 
-Built-in adapters are provided for popular logging frameworks including modern slog support:
+Three methods, key-value pairs after the message. Implementations stay
+goroutine-safe; `(*Error).Log` calls them synchronously.
 
-```go
-// Slog logger (Go 1.21+) - Recommended for new projects
-slogLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-    Level: slog.LevelDebug,
-}))
-err := ewrap.New("error occurred",
-    ewrap.WithLogger(adapters.NewSlogAdapter(slogLogger)))
+## Performance
 
-// Zap logger
-zapLogger, _ := zap.NewProduction()
-err := ewrap.New("error occurred",
-    ewrap.WithLogger(adapters.NewZapAdapter(zapLogger)))
+Snapshot from `go test -bench=. -benchmem ./test/...` on Apple Silicon (Go 1.25+):
 
-// Logrus logger
-logrusLogger := logrus.New()
-err := ewrap.New("error occurred",
-    ewrap.WithLogger(adapters.NewLogrusAdapter(logrusLogger)))
+| Benchmark | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `BenchmarkNew/Simple` | 1622 | 496 | 2 |
+| `BenchmarkWrap/NestedWraps` | 11433 | 1512 | 9 |
+| `BenchmarkFormatting/ToJSON` | 16947 | 2941 | 14 |
+| `BenchmarkStackTrace/CaptureStack` | 858 | 256 | 1 |
+| `BenchmarkStackTrace/FormatStack` (cached) | **1.71** | 0 | **0** |
+| `BenchmarkCircuitBreaker/RecordFailure` | 33 | 0 | 0 |
+| `BenchmarkMetadataOperations/GetMetadata` | 9 | 0 | 0 |
 
-// Zerolog logger
-zerologLogger := zerolog.New(os.Stdout)
-err := ewrap.New("error occurred",
-    ewrap.WithLogger(adapters.NewZerologAdapter(zerologLogger)))
+Notable design choices behind the numbers:
+
+- **Lazy metadata map** — only allocated on the first `WithMetadata` call.
+- **Cached `Error()` / `Stack()`** — `sync.Once` guards a one-shot computation;
+  subsequent reads are lock-free.
+- **goccy/go-json** for the serialization hot path: ~2.5× faster than
+  stdlib `encoding/json` with ~half the allocations.
+- **`runtime.Callers`** captures up to 32 PCs by default, configurable via
+  `WithStackDepth(n)`. The frame filter is function-prefix based, so the
+  output starts at user code.
+- **Breaker** is allocation-free in steady state; observer/callback dispatch
+  happens outside the lock to avoid holding it across user code.
+
+## Project layout
+
+```text
+.
+├── attributes.go              # WithHTTPStatus, WithRetryable, WithSafeMessage
+├── context.go                 # ErrorContext, WithContext option
+├── errors.go                  # Error type, New/Wrap/Newf/Wrapf, lazy paths
+├── error_group.go             # ErrorGroup, pool, serialization
+├── format.go                  # ErrorOutput, ToJSON/ToYAML
+├── format_verb.go             # fmt.Formatter, slog.LogValuer
+├── logger.go                  # Logger interface
+├── observability.go           # Observer interface (errors only)
+├── retry.go                   # RetryInfo, WithRetry
+├── stack.go                   # StackFrame, StackIterator
+├── types.go                   # ErrorType, Severity, RecoverySuggestion
+├── breaker/                   # opt-in circuit breaker
+└── slog/                      # opt-in slog adapter
 ```
 
-### Recovery Suggestions in Logging
+## Development
 
-Recovery suggestions are now automatically included in log output:
-
-```go
-err := ewrap.New("database connection failed",
-    ewrap.WithRecoverySuggestion("Check database connectivity and connection pool settings"))
-
-// When logged, includes recovery guidance for operations teams
-err.Log() // Outputs recovery suggestion in structured format
+```bash
+git clone https://github.com/hyp3rd/ewrap.git
+cd ewrap
+make prepare-toolchain    # one-time: golangci-lint, gofumpt, govulncheck, gosec
+make test                 # go test -v -timeout 5m -cover ./...
+make test-race            # go test -race ./...
+make benchmark            # go test -bench=. -benchmem ./test/...
+make lint                 # gci + gofumpt + staticcheck + golangci-lint
+make sec                  # govulncheck + gosec
 ```
-
-## Error Formatting
-
-Convert errors to structured formats with proper timestamp formatting:
-
-```go
-// Convert to JSON with proper timestamp formatting
-jsonStr, _ := err.ToJSON(
-    ewrap.WithTimestampFormat(time.RFC3339),
-    ewrap.WithStackTrace(true),
-    ewrap.WithRecoverySuggestion(true))
-
-// Convert to YAML with custom formatting
-yamlStr, _ := err.ToYAML(
-    ewrap.WithTimestampFormat("2006-01-02T15:04:05Z07:00"),
-    ewrap.WithStackTrace(true))
-
-// Serialize entire error groups
-pool := ewrap.NewErrorGroupPool(4)
-eg := pool.Get()
-eg.Add(err1)
-eg.Add(err2)
-
-// Export all errors in the group
-groupJSON, _ := eg.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
-```
-
-### Modern Go Features Integration
-
-Leverage Go 1.25+ features for efficient operations:
-
-```go
-// Efficient metadata copying using maps.Clone
-originalErr := ewrap.New("base error").WithMetadata("key1", "value1")
-clonedErr := originalErr.Clone() // Uses maps.Clone internally
-
-// Error group integration with errors.Join
-eg := pool.Get()
-eg.Add(err1, err2, err3)
-standardErr := eg.Join() // Returns standard errors.Join result
-
-// Use with standard library error handling
-if errors.Is(standardErr, expectedErr) {
-    // Handle specific error type
-}
-```
-
-## Performance Considerations
-
-The package is designed with performance in mind and leverages modern Go features:
-
-### Go 1.25+ Optimizations
-
-- Uses `maps.Clone` and `slices.Clone` for efficient copying operations
-- Zero-allocation paths for error creation and wrapping in hot paths
-- Optimized stack trace capture with intelligent filtering
-
-### Memory Management
-
-- Error groups use `sync.Pool` for efficient memory reuse
-- Stack frame iterators provide lazy evaluation
-- Minimal allocations during error metadata operations
-
-### Concurrency & Safety
-
-- Thread-safe operations with low lock contention
-- Atomic operations for circuit breaker state management
-- Lock-free observability hook notifications
-
-### Structured Operations
-
-- Pre-allocated buffers for JSON/YAML serialization
-- Efficient stack trace capture and filtering
-- Optimized metadata storage and retrieval
-
-## Observability Features
-
-### Built-in Monitoring
-
-- Error frequency tracking and reporting
-- Circuit breaker state transition monitoring
-- Recovery suggestion effectiveness metrics
-
-### Integration Points
-
-```go
-// Implement the Observer interface for custom monitoring
-type Observer interface {
-    OnErrorCreated(err *Error, context ErrorContext)
-    OnCircuitBreakerStateChange(name string, from, to CircuitState)
-    OnRecoverySuggestionTriggered(suggestion string, context ErrorContext)
-}
-
-// Register observers for monitoring
-ewrap.RegisterGlobalObserver(myObserver)
-```
-
-## Development Setup
-
-1. Clone this repository:
-
-   ```bash
-   git clone https://github.com/hyp3rd/ewrap.git
-   ```
-
-1. Install VS Code Extensions Recommended (optional):
-
-   ```json
-   {
-     "recommendations": [
-       "github.vscode-github-actions",
-       "golang.go",
-       "ms-vscode.makefile-tools",
-       "esbenp.prettier-vscode",
-       "pbkit.vscode-pbkit",
-       "trunk.io",
-       "streetsidesoftware.code-spell-checker",
-       "ms-azuretools.vscode-docker",
-       "eamodio.gitlens"
-     ]
-   }
-   ```
-
-   1. Install [**Golang**](https://go.dev/dl).
-   1. Install [**GitVersion**](https://github.com/GitTools/GitVersion).
-   1. Install [**Make**](https://www.gnu.org/software/make/), follow the procedure for your OS.
-   1. **Set up the toolchain:**
-
-      ```bash
-      make prepare-toolchain
-      ```
-
-   1. Initialize `pre-commit` (strongly recommended to create a virtual env, using for instance [PyEnv](https://github.com/pyenv/pyenv)) and its hooks:
-
-   ```bash
-      pip install pre-commit
-      pre-commit install
-      pre-commit install-hooks
-   ```
-
-## Project Structure
-
-```txt
-├── internal/ # Private code
-│   └── logger/ # Application specific code
-├── pkg/ # Public libraries)
-├── scripts/ # Scripts for development
-├── test/ # Additional test files
-└── docs/ # Documentation
-```
-
-## Best Practices
-
-- Follow the [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments)
-- Run `golangci-lint` before committing code
-- Ensure the pre-commit hooks pass
-- Write tests for new functionality
-- Keep packages small and focused
-- Use meaningful package names
-- Document exported functions and types
-
-## Available Make Commands
-
-- `make test`: Run tests.
-- `make benchmark`: Run benchmark tests.
-- `make update-deps`: Update all dependencies in the project.
-- `make prepare-toolchain`: Install all tools required to build the project.
-- `make lint`: Run the staticcheck and golangci-lint static analysis tools on all packages in the project.
-- `make run`: Build and run the application in Docker.
 
 ## License
 
@@ -476,13 +291,8 @@ ewrap.RegisterGlobalObserver(myObserver)
 
 ## Contributing
 
-1. Fork the repository
-1. Create your feature branch
-1. Commit your changes
-1. Push to the branch
-1. Create a Pull Request
-
-Refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
+See [CONTRIBUTING](CONTRIBUTING.md). PRs welcome — please run `make lint` and
+`make test-race` before opening one.
 
 ## Author
 

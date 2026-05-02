@@ -1,5 +1,25 @@
 package ewrap
 
+// Canonical string forms for ErrorType and Severity. These are the values
+// returned by String() and used in serialized payloads, so they're worth
+// pinning as named constants rather than free-floating literals.
+const (
+	typeUnknownStr       = "unknown"
+	typeValidationStr    = "validation"
+	typeNotFoundStr      = "not_found"
+	typePermissionStr    = "permission"
+	typeDatabaseStr      = "database"
+	typeNetworkStr       = "network"
+	typeConfigurationStr = "configuration"
+	typeInternalStr      = "internal"
+	typeExternalStr      = "external"
+
+	severityInfoStr     = "info"
+	severityWarningStr  = "warning"
+	severityErrorStr    = "error"
+	severityCriticalStr = "critical"
+)
+
 // ErrorType represents the type of error that occurred.
 type ErrorType int
 
@@ -24,30 +44,30 @@ const (
 	ErrorTypeExternal
 )
 
-// String returns the string representation of the error type,
-// useful for logging and error reporting.
+// String returns the string representation of the error type, useful for
+// logging and error reporting.
 func (et ErrorType) String() string {
 	switch et {
 	case ErrorTypeValidation:
-		return "validation"
+		return typeValidationStr
 	case ErrorTypeNotFound:
-		return "not_found"
+		return typeNotFoundStr
 	case ErrorTypePermission:
-		return "permission"
+		return typePermissionStr
 	case ErrorTypeDatabase:
-		return "database"
+		return typeDatabaseStr
 	case ErrorTypeNetwork:
-		return "network"
+		return typeNetworkStr
 	case ErrorTypeConfiguration:
-		return "configuration"
+		return typeConfigurationStr
 	case ErrorTypeInternal:
-		return "internal"
+		return typeInternalStr
 	case ErrorTypeExternal:
-		return "external"
+		return typeExternalStr
 	case ErrorTypeUnknown:
 		fallthrough
 	default:
-		return "unknown"
+		return typeUnknownStr
 	}
 }
 
@@ -69,15 +89,15 @@ const (
 func (s Severity) String() string {
 	switch s {
 	case SeverityInfo:
-		return "info"
+		return severityInfoStr
 	case SeverityWarning:
-		return "warning"
+		return severityWarningStr
 	case SeverityError:
-		return "error"
+		return severityErrorStr
 	case SeverityCritical:
-		return "critical"
+		return severityCriticalStr
 	default:
-		return "unknown"
+		return typeUnknownStr
 	}
 }
 

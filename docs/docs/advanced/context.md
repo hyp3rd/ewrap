@@ -1,310 +1,141 @@
 # Context Integration
 
-Understanding how to effectively integrate error handling with Go's context package is crucial for building robust, context-aware applications. Context integration allows us to carry request-scoped data, handle timeouts gracefully, and maintain traceability throughout our application's error handling flow.
+`context.Context` flows through every modern Go service. ewrap weaves it
+into errors via the `WithContext` option, lifts request-scoped values out
+automatically, and exposes them via the typed `ErrorContext` accessor.
 
-## Understanding Context in Error Handling
-
-Go's context package serves multiple purposes in error handling:
-
-- Carrying request-scoped values (like request IDs or user information)
-- Managing timeouts and cancellation
-- Ensuring proper resource cleanup
-- Maintaining traceability across service boundaries
-
-Let's explore how ewrap integrates with context to enhance error handling capabilities.
-
-## Basic Context Integration
-
-The most straightforward way to integrate context with error handling is through the WithContext option:
+## What `WithContext` does
 
 ```go
-func processUserRequest(ctx context.Context, userID string) error {
-    // Create an error with context
-    if err := validateUser(userID); err != nil {
-        return ewrap.Wrap(err, "user validation failed",
-            ewrap.WithContext(ctx, ErrorTypeValidation, SeverityError))
-    }
+err := ewrap.New("payment failed",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError))
+```
 
-    return nil
+This builds an `ErrorContext` and attaches it as a typed field on the
+`*Error`. The option:
+
+1. Records the supplied `ErrorType` and `Severity`.
+2. Captures the file/line of the calling `New`/`Wrap` (via
+   `runtime.Caller`).
+3. Sets `Environment` from `APP_ENV` (or `"development"` by default).
+4. Reads four well-known keys out of `ctx`:
+   - `request_id` → `ErrorContext.RequestID`
+   - `user`       → `ErrorContext.User`
+   - `operation`  → `ErrorContext.Operation`
+   - `component`  → `ErrorContext.Component`
+
+If you store request-scoped data under those exact string keys, ewrap
+picks it up for free.
+
+## Reading the context back
+
+```go
+if ec := err.GetErrorContext(); ec != nil {
+    fmt.Println(ec.RequestID, ec.Component, ec.Operation, ec.Type, ec.Severity)
 }
 ```
 
-When you add context to an error, ewrap automatically extracts and preserves important context values such as:
+The accessor returns `*ErrorContext` (or `nil`) — typed, no runtime cast.
 
-- Request IDs for tracing
-- User information for auditing
-- Operation metadata for monitoring
-- Timing information for performance tracking
+## Wiring it into your context
 
-## Advanced Context Usage
-
-Let's look at more sophisticated ways to use context in error handling:
+If you use `context.WithValue` for request data, use **string** keys
+matching the names above:
 
 ```go
-// Define context keys for common values
-type contextKey string
+ctx = context.WithValue(ctx, "request_id", reqID)
+ctx = context.WithValue(ctx, "user", userID)
+ctx = context.WithValue(ctx, "operation", "POST /v1/charges")
+ctx = context.WithValue(ctx, "component", "billing")
+```
 
-const (
-    requestIDKey contextKey = "request_id"
-    userIDKey    contextKey = "user_id"
-    traceIDKey   contextKey = "trace_id"
-)
+Some teams prefer typed keys (e.g. `type ctxKey int`) for safety; in that
+case, set both — the typed key for your own code, and the string key for
+ewrap to consume:
 
-// RequestContext enriches context with standard fields
-func RequestContext(ctx context.Context, requestID, userID string) context.Context {
-    ctx = context.WithValue(ctx, requestIDKey, requestID)
-    ctx = context.WithValue(ctx, userIDKey, userID)
-    ctx = context.WithValue(ctx, traceIDKey, generateTraceID())
-    return ctx
-}
+```go
+type ctxKey int
+const reqIDKey ctxKey = iota
 
-// ContextualOperation shows how to use context throughout an operation
-func ContextualOperation(ctx context.Context) error {
-    // Extract context values
-    requestID := ctx.Value(requestIDKey).(string)
-    userID := ctx.Value(userIDKey).(string)
+ctx = context.WithValue(ctx, reqIDKey, reqID) // typed key for your code
+ctx = context.WithValue(ctx, "request_id", reqID) // string key for ewrap
+```
 
-    // Create an operation-specific context
-    opCtx := ewrap.WithOperationContext(ctx, "user_update")
+## Inheritance through `Wrap`
 
-    // Start a timed operation
-    timer := time.Now()
+`Wrap` carries the inherited `ErrorContext` from a wrapped `*Error`:
 
-    // Perform the operation with timeout
-    if err := performTimedOperation(opCtx); err != nil {
-        return ewrap.Wrap(err, "operation failed",
-            ewrap.WithContext(ctx, ErrorTypeInternal, SeverityError)).
-            WithMetadata("request_id", requestID).
-            WithMetadata("user_id", userID).
-            WithMetadata("duration_ms", time.Since(timer).Milliseconds())
+```go
+inner := ewrap.New("DB unreachable",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
+
+outer := ewrap.Wrap(inner, "loading user profile")
+
+outer.GetErrorContext() // same as inner.GetErrorContext()
+```
+
+Pass `WithContext` to `Wrap` to override at the new layer.
+
+## Cancellation and deadlines
+
+`WithContext` does not record `ctx.Err()` automatically. If a deadline or
+cancellation is the cause, wrap that error explicitly so callers can
+classify with `errors.Is`:
+
+```go
+if err := upstream.Call(ctx); err != nil {
+    if errors.Is(err, context.DeadlineExceeded) {
+        return ewrap.Wrap(err, "upstream call timed out",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeNetwork, ewrap.SeverityWarning),
+            ewrap.WithRetryable(true),
+            ewrap.WithHTTPStatus(http.StatusGatewayTimeout))
     }
-
-    return nil
+    if errors.Is(err, context.Canceled) {
+        return ewrap.Wrap(err, "upstream call cancelled",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityInfo))
+    }
+    return ewrap.Wrap(err, "upstream call failed",
+        ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError))
 }
 ```
 
-## Context-Aware Error Groups
+## Tracing integration
 
-Error groups can be made context-aware to handle cancellation and timeouts:
-
-```go
-// ContextualErrorGroup manages errors with context awareness
-type ContextualErrorGroup struct {
-    *ewrap.ErrorGroup
-    ctx context.Context
-}
-
-// NewContextualErrorGroup creates a context-aware error group
-func NewContextualErrorGroup(ctx context.Context, pool *ewrap.ErrorGroupPool) *ContextualErrorGroup {
-    return &ContextualErrorGroup{
-        ErrorGroup: pool.Get(),
-        ctx:       ctx,
-    }
-}
-
-// ProcessWithContext demonstrates context-aware parallel processing
-func ProcessWithContext(ctx context.Context, items []Item) error {
-    pool := ewrap.NewErrorGroupPool(len(items))
-    group := NewContextualErrorGroup(ctx, pool)
-    defer group.Release()
-
-    var wg sync.WaitGroup
-    for _, item := range items {
-        wg.Add(1)
-        go func(item Item) {
-            defer wg.Done()
-
-            // Check context cancellation
-            select {
-            case <-ctx.Done():
-                group.Add(ewrap.New("operation cancelled",
-                    ewrap.WithContext(ctx, ErrorTypeInternal, SeverityWarning)))
-                return
-            default:
-                if err := processItem(ctx, item); err != nil {
-                    group.Add(err)
-                }
-            }
-        }(item)
-    }
-
-    wg.Wait()
-    return group.Error()
-}
-```
-
-## Timeout and Cancellation Handling
-
-Proper context integration includes handling timeouts and cancellation gracefully:
+`Observer.RecordError(message)` runs synchronously. Pull the active span
+out of the active goroutine's context inside the observer:
 
 ```go
-// TimeoutAwareOperation shows how to handle context timeouts
-func TimeoutAwareOperation(ctx context.Context) error {
-    // Create a timeout context
-    ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-    defer cancel()
+type otelObserver struct{}
 
-    // Channel for operation result
-    resultCh := make(chan error, 1)
-
-    // Start the operation
-    go func() {
-        resultCh <- performLongOperation(ctx)
-    }()
-
-    // Wait for result or timeout
-    select {
-    case err := <-resultCh:
-        if err != nil {
-            return ewrap.Wrap(err, "operation failed",
-                ewrap.WithContext(ctx, ErrorTypeInternal, SeverityError))
-        }
-        return nil
-    case <-ctx.Done():
-        return ewrap.New("operation timed out",
-            ewrap.WithContext(ctx, ErrorTypeTimeout, SeverityCritical)).
-            WithMetadata("timeout", 5*time.Second)
+func (o *otelObserver) RecordError(message string) {
+    span := trace.SpanFromContext(activeContext()) // however your code reaches it
+    if span.IsRecording() {
+        span.RecordError(errors.New(message))
     }
 }
 ```
 
-## Context Propagation in Middleware
+For richer attribute propagation, store the relevant tracing data on the
+error via `WithMetadata` and emit it from your `Logger` adapter — that
+gives you the structured key/value pairs ewrap would otherwise hide
+behind a single message.
 
-Context integration is particularly useful in middleware chains:
+## Why string keys for context lookup?
 
-```go
-// ErrorHandlingMiddleware demonstrates context propagation
-func ErrorHandlingMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Create request context with tracing
-        ctx := r.Context()
-        requestID := generateRequestID()
-        ctx = context.WithValue(ctx, requestIDKey, requestID)
+`context.WithValue` keys are typed `any`, so unique compile-time keys
+require shared package-level types — which would create a dependency
+cycle between ewrap and consumer code.
 
-        // Create error group for request
-        pool := ewrap.NewErrorGroupPool(4)
-        eg := pool.Get()
-        defer eg.Release()
-
-        // Wrap handler execution
-        err := func() error {
-            // Add request timing
-            timer := time.Now()
-            defer func() {
-                if err := recover(); err != nil {
-                    eg.Add(ewrap.New("panic in handler",
-                        ewrap.WithContext(ctx, ErrorTypeInternal, SeverityCritical)).
-                        WithMetadata("panic_value", err).
-                        WithMetadata("stack", debug.Stack()))
-                }
-            }()
-
-            // Execute handler
-            next.ServeHTTP(w, r.WithContext(ctx))
-
-            // Record timing
-            duration := time.Since(timer)
-            if duration > time.Second {
-                eg.Add(ewrap.New("slow request",
-                    ewrap.WithContext(ctx, ErrorTypePerformance, SeverityWarning)).
-                    WithMetadata("duration_ms", duration.Milliseconds()))
-            }
-
-            return nil
-        }()
-
-        if err != nil {
-            eg.Add(err)
-        }
-
-        // Handle any collected errors
-        if eg.HasErrors() {
-            handleRequestErrors(w, eg.Error())
-        }
-    })
-}
-```
-
-## Best Practices
-
-### 1. Consistent Context Propagation
-
-Maintain consistent context handling throughout your application:
+Pinning to string keys keeps ewrap independent of any particular
+context-key convention. If you'd rather store everything via typed keys
+in your own code, build the `ErrorContext` explicitly and use the method
+form:
 
 ```go
-// ContextualService demonstrates consistent context handling
-type ContextualService struct {
-    db  *Database
-    log Logger
-}
-
-func (s *ContextualService) ProcessRequest(ctx context.Context, req Request) error {
-    // Enrich context with request information
-    ctx = enrichContext(ctx, req)
-
-    // Use context in all operations
-    if err := s.validateRequest(ctx, req); err != nil {
-        return ewrap.Wrap(err, "validation failed",
-            ewrap.WithContext(ctx, ErrorTypeValidation, SeverityError))
-    }
-
-    if err := s.processData(ctx, req.Data); err != nil {
-        return ewrap.Wrap(err, "processing failed",
-            ewrap.WithContext(ctx, ErrorTypeInternal, SeverityError))
-    }
-
-    return nil
-}
+err.WithContext(&ewrap.ErrorContext{
+    RequestID: reqIDFromTypedKey(ctx),
+    User:      userFromTypedKey(ctx),
+    Type:      ewrap.ErrorTypeExternal,
+    Severity:  ewrap.SeverityError,
+})
 ```
-
-### 2. Context Value Management
-
-Be careful with context values and provide type-safe accessors:
-
-```go
-// RequestInfo holds request-specific context values
-type RequestInfo struct {
-    RequestID string
-    UserID    string
-    TraceID   string
-    StartTime time.Time
-}
-
-// GetRequestInfo safely extracts request information from context
-func GetRequestInfo(ctx context.Context) (RequestInfo, bool) {
-    info, ok := ctx.Value(requestInfoKey).(RequestInfo)
-    return info, ok
-}
-
-// WithRequestInfo adds request information to context
-func WithRequestInfo(ctx context.Context, info RequestInfo) context.Context {
-    return context.WithValue(ctx, requestInfoKey, info)
-}
-```
-
-### 3. Error Context Enrichment
-
-Systematically enrich errors with context information:
-
-```go
-// EnrichError adds standard context information to errors
-func EnrichError(ctx context.Context, err error) error {
-    if err == nil {
-        return nil
-    }
-
-    info, ok := GetRequestInfo(ctx)
-    if !ok {
-        return err
-    }
-
-    return ewrap.Wrap(err, "operation failed",
-        ewrap.WithContext(ctx, getErrorType(err), getSeverity(err))).
-        WithMetadata("request_id", info.RequestID).
-        WithMetadata("user_id", info.UserID).
-        WithMetadata("trace_id", info.TraceID).
-        WithMetadata("duration_ms", time.Since(info.StartTime).Milliseconds())
-}
-```
-
-The context integration in ewrap provides a robust foundation for error tracking and debugging. By consistently using these features, you can build applications that are easier to monitor, debug, and maintain.

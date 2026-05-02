@@ -7,63 +7,79 @@ import (
 	"testing"
 )
 
+const (
+	concurrentPoolGoroutines = 100
+	smallCapacity            = 2
+	smallErrorCount          = 5
+	exactCapacity            = 4
+	largeCapacity            = 8
+	largeErrorCount          = 3
+)
+
 func TestErrorGroupPool(t *testing.T) {
-	// Test pool with different capacities
+	t.Parallel()
+
 	tests := []struct {
 		name            string
 		initialCapacity int
 		numErrors       int
 	}{
-		{"SmallCapacity", 2, 5},
-		{"ExactCapacity", 4, 4},
-		{"LargeCapacity", 8, 3},
-		{"InvalidCapacity", -1, 4}, // Should use default capacity
+		{"SmallCapacity", smallCapacity, smallErrorCount},
+		{"ExactCapacity", exactCapacity, exactCapacity},
+		{"LargeCapacity", largeCapacity, largeErrorCount},
+		{"InvalidCapacity", -1, exactCapacity},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pool := NewErrorGroupPool(tt.initialCapacity)
-
-			// Get multiple groups from the pool
-			groups := make([]*ErrorGroup, 3)
-			for i := range groups {
-				groups[i] = pool.Get()
-
-				// Add errors
-				for j := 0; j < tt.numErrors; j++ {
-					groups[i].Add(fmt.Errorf("error %d", j))
-				}
-			}
-
-			// Verify each group works correctly
-			for _, eg := range groups {
-				if got := len(eg.errors); got != tt.numErrors {
-					t.Errorf("Expected %d errors, got %d", tt.numErrors, got)
-				}
-
-				eg.Release()
-			}
+			t.Parallel()
+			runPoolCase(t, tt.initialCapacity, tt.numErrors)
 		})
 	}
 }
 
+func runPoolCase(t *testing.T, initialCapacity, numErrors int) {
+	t.Helper()
+
+	pool := NewErrorGroupPool(initialCapacity)
+
+	const groupCount = 3
+
+	groups := make([]*ErrorGroup, groupCount)
+	for i := range groups {
+		groups[i] = pool.Get()
+
+		for j := range numErrors {
+			groups[i].Add(fmt.Errorf("%w %d", errIndexed, j))
+		}
+	}
+
+	for _, eg := range groups {
+		if got := len(eg.errors); got != numErrors {
+			t.Errorf("Expected %d errors, got %d", numErrors, got)
+		}
+
+		eg.Release()
+	}
+}
+
 func TestConcurrentPoolUsage(t *testing.T) {
-	pool := NewErrorGroupPool(4)
+	t.Parallel()
+
+	pool := NewErrorGroupPool(exactCapacity)
 
 	var wg sync.WaitGroup
 
-	numGoroutines := 100
+	wg.Add(concurrentPoolGoroutines)
 
-	wg.Add(numGoroutines)
-
-	for i := range numGoroutines {
+	for i := range concurrentPoolGoroutines {
 		go func(id int) {
 			defer wg.Done()
 
 			eg := pool.Get()
 			defer eg.Release()
 
-			eg.Add(fmt.Errorf("error from goroutine %d", id))
+			eg.Add(fmt.Errorf("%w %d", errFromGoroutine, id))
 
 			if !eg.HasErrors() {
 				t.Errorf("Expected errors in group %d", id)
@@ -75,58 +91,71 @@ func TestConcurrentPoolUsage(t *testing.T) {
 }
 
 func BenchmarkErrorGroupPool(b *testing.B) {
-	sampleErrors := make([]error, 5)
+	const sampleCount = 5
+
+	sampleErrors := make([]error, sampleCount)
 	for i := range sampleErrors {
-		sampleErrors[i] = fmt.Errorf("error %d", i)
+		sampleErrors[i] = fmt.Errorf("%w %d", errIndexed, i)
 	}
 
 	b.Run("WithPool", func(b *testing.B) {
-		pool := NewErrorGroupPool(4)
-
-		b.ReportAllocs()
-
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				eg := pool.Get()
-				for _, err := range sampleErrors {
-					eg.Add(err)
-				}
-
-				_ = eg.Error()
-				eg.Release()
-			}
-		})
+		benchPoolWithPool(b, sampleErrors)
 	})
 
 	b.Run("WithoutPool", func(b *testing.B) {
-		b.ReportAllocs()
+		benchPoolWithoutPool(b, sampleErrors)
+	})
+}
 
-		for i := 0; i < b.N; i++ {
-			eg := NewErrorGroup()
+func benchPoolWithPool(b *testing.B, sampleErrors []error) {
+	b.Helper()
+
+	pool := NewErrorGroupPool(exactCapacity)
+
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			eg := pool.Get()
 			for _, err := range sampleErrors {
 				eg.Add(err)
 			}
 
 			_ = eg.Error()
+			eg.Release()
 		}
 	})
 }
 
-func TestErrorGroupJoin(t *testing.T) {
-	eg := NewErrorGroup()
-	err1 := errors.New("first")
-	err2 := errors.New("second")
+func benchPoolWithoutPool(b *testing.B, sampleErrors []error) {
+	b.Helper()
 
-	eg.Add(err1)
-	eg.Add(err2)
+	b.ReportAllocs()
+
+	for range b.N {
+		eg := NewErrorGroup()
+		for _, err := range sampleErrors {
+			eg.Add(err)
+		}
+
+		_ = eg.Error()
+	}
+}
+
+func TestErrorGroupJoin(t *testing.T) {
+	t.Parallel()
+
+	eg := NewErrorGroup()
+	eg.Add(errFirst)
+	eg.Add(errSecond)
 
 	joined := eg.Join()
 	if joined == nil {
 		t.Fatal("expected joined error")
 	}
 
-	if !errors.Is(joined, err1) || !errors.Is(joined, err2) {
-		t.Fatalf("joined error does not contain original errors")
+	if !errors.Is(joined, errFirst) || !errors.Is(joined, errSecond) {
+		t.Fatal("joined error does not contain original errors")
 	}
 
 	eg.Clear()

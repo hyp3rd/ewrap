@@ -1,234 +1,335 @@
 # Advanced Examples
 
-These examples demonstrate sophisticated error handling patterns using ewrap's advanced features. We'll explore complex scenarios that combine multiple features to create robust error handling solutions.
+Realistic scenarios combining multiple ewrap features. Each example is
+self-contained and uses the current API.
 
-## Microservice Error Handling
-
-This example shows a complete microservice error handling setup, combining circuit breakers, error groups, and contextual logging:
+## HTTP service with classification + retry
 
 ```go
-// ServiceManager handles communication with external services
-type ServiceManager struct {
-    // Circuit breakers for different services
-    authBreaker    *ewrap.CircuitBreaker
-    paymentBreaker *ewrap.CircuitBreaker
-    storageBreaker *ewrap.CircuitBreaker
+package billing
 
-    // Error group pool for batch operations
-    errorPool *ewrap.ErrorGroupPool
+import (
+    "context"
+    "net/http"
+    "time"
 
-    // Contextual logger
-    logger Logger
+    "github.com/hyp3rd/ewrap"
+    "github.com/hyp3rd/ewrap/breaker"
+)
+
+type Service struct {
+    upstream Upstream
+    breaker  *breaker.Breaker
+    logger   ewrap.Logger
 }
 
-func NewServiceManager(logger Logger) *ServiceManager {
-    return &ServiceManager{
-        authBreaker:    ewrap.NewCircuitBreaker("auth", 5, time.Second*30),
-        paymentBreaker: ewrap.NewCircuitBreaker("payment", 3, time.Minute),
-        storageBreaker: ewrap.NewCircuitBreaker("storage", 5, time.Second*45),
-        errorPool:      ewrap.NewErrorGroupPool(10),
-        logger:        logger,
-    }
-}
-
-func (sm *ServiceManager) ProcessOrder(ctx context.Context, order Order) error {
-    // Create error group for the operation
-    eg := sm.errorPool.Get()
-    defer eg.Release()
-
-    // Enrich context with operation details
-    ctx = context.WithValue(ctx, "operation", "process_order")
-    ctx = context.WithValue(ctx, "order_id", order.ID)
-
-    // Step 1: Authenticate user
-    if !sm.authBreaker.CanExecute() {
-        return ewrap.New("authentication service unavailable",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityCritical),
-            ewrap.WithLogger(sm.logger))
+func (s *Service) Charge(ctx context.Context, req ChargeRequest) (*Receipt, error) {
+    if err := req.Validate(); err != nil {
+        return nil, ewrap.Wrap(err, "invalid charge request",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityWarning),
+            ewrap.WithHTTPStatus(http.StatusUnprocessableEntity),
+            ewrap.WithSafeMessage("invalid charge request"),
+            ewrap.WithLogger(s.logger))
     }
 
-    if err := sm.authenticateUser(ctx, order.UserID); err != nil {
-        sm.authBreaker.RecordFailure()
-        return ewrap.Wrap(err, "authentication failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypePermission, ewrap.SeverityError),
-            ewrap.WithLogger(sm.logger))
-    }
-    sm.authBreaker.RecordSuccess()
-
-    // Step 2: Process payment with retry mechanism
-    if !sm.paymentBreaker.CanExecute() {
-        return ewrap.New("payment service unavailable",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityCritical),
-            ewrap.WithLogger(sm.logger))
+    if !s.breaker.CanExecute() {
+        return nil, ewrap.New("payments breaker open",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityWarning),
+            ewrap.WithHTTPStatus(http.StatusServiceUnavailable),
+            ewrap.WithRetryable(true),
+            ewrap.WithRetry(3, 2*time.Second),
+            ewrap.WithLogger(s.logger))
     }
 
-    err := retry.Do(
-        func() error {
-            return sm.processPayment(ctx, order)
-        },
-        retry.Attempts(3),
-        retry.Delay(time.Second),
-        retry.OnRetry(func(n uint, err error) {
-            sm.logger.Debug("retrying payment",
-                "attempt", n+1,
-                "error", err.Error())
-        }),
-    )
-
+    receipt, err := s.upstream.Charge(ctx, req)
     if err != nil {
-        sm.paymentBreaker.RecordFailure()
-        return ewrap.Wrap(err, "payment processing failed",
+        s.breaker.RecordFailure()
+
+        return nil, ewrap.Wrap(err, "upstream charge",
             ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError),
-            ewrap.WithLogger(sm.logger))
-    }
-    sm.paymentBreaker.RecordSuccess()
-
-    // Step 3: Update inventory in parallel
-    var wg sync.WaitGroup
-    for _, item := range order.Items {
-        wg.Add(1)
-        go func(item OrderItem) {
-            defer wg.Done()
-
-            if err := sm.updateInventory(ctx, item); err != nil {
-                eg.Add(ewrap.Wrap(err, "inventory update failed",
-                    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError),
-                    ewrap.WithLogger(sm.logger)).
-                    WithMetadata("item_id", item.ID))
-            }
-        }(item)
-    }
-    wg.Wait()
-
-    // Check if any inventory updates failed
-    if eg.HasErrors() {
-        return eg.Error()
+            ewrap.WithHTTPStatus(http.StatusBadGateway),
+            ewrap.WithRetryable(true),
+            ewrap.WithSafeMessage("payment provider error"),
+            ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+                Message:       "Retry after backoff; check provider status page.",
+                Documentation: "https://runbooks.example.com/payments/upstream",
+            }),
+            ewrap.WithLogger(s.logger)).
+            WithMetadata("provider", "stripe").
+            WithMetadata("amount_cents", req.AmountCents)
     }
 
-    return nil
-}
-
-// Error handling middleware for HTTP servers
-func ErrorHandlingMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Create request-specific error group
-        pool := ewrap.NewErrorGroupPool(4)
-        eg := pool.Get()
-        defer eg.Release()
-
-        // Enrich context with request information
-        ctx := r.Context()
-        ctx = context.WithValue(ctx, "request_id", uuid.New().String())
-        ctx = context.WithValue(ctx, "user_agent", r.UserAgent())
-        ctx = context.WithValue(ctx, "remote_addr", r.RemoteAddr)
-
-        // Wrap handler execution with panic recovery
-        func() {
-            defer func() {
-                if r := recover(); r != nil {
-                    err := ewrap.New("panic recovered",
-                        ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityCritical),
-                        ewrap.WithLogger(logger)).
-                        WithMetadata("panic_value", r).
-                        WithMetadata("stack", string(debug.Stack()))
-                    eg.Add(err)
-                }
-            }()
-
-            next.ServeHTTP(w, r.WithContext(ctx))
-        }()
-
-        // Handle any collected errors
-        if eg.HasErrors() {
-            handleErrors(w, r, eg.Error())
-            return
-        }
-    })
-}
-
-// Sophisticated error response handling
-func handleErrors(w http.ResponseWriter, r *http.Request, err error) {
-    var response ErrorResponse
-
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Convert error to API response
-        response = ErrorResponse{
-            Code:      getErrorCode(wrappedErr),
-            Message:   sanitizeErrorMessage(wrappedErr.Error()),
-            RequestID: r.Context().Value("request_id").(string),
-            Timestamp: time.Now().UTC(),
-        }
-
-        // Add details based on error type
-        if details := getErrorDetails(wrappedErr); details != nil {
-            response.Details = details
-        }
-
-        // Log error with full context
-        logger.Error("request failed",
-            "error", wrappedErr.Error(),
-            "stack", wrappedErr.Stack(),
-            "metadata", wrappedErr.GetMetadata("error_context"),
-            "request_id", response.RequestID)
-
-        // Set appropriate HTTP status
-        w.WriteHeader(getHTTPStatus(wrappedErr))
-    } else {
-        // Handle unwrapped errors
-        response = ErrorResponse{
-            Code:    "INTERNAL_ERROR",
-            Message: "An unexpected error occurred",
-        }
-        w.WriteHeader(http.StatusInternalServerError)
-    }
-
-    // Write JSON response
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(response)
-}
-
-// Helper functions for error handling
-func getErrorCode(err *ewrap.Error) string {
-    if ctx, ok := err.GetMetadata("error_context").(*ewrap.ErrorContext); ok {
-        switch ctx.Type {
-        case ewrap.ErrorTypeValidation:
-            return "VALIDATION_ERROR"
-        case ewrap.ErrorTypePermission:
-            return "PERMISSION_DENIED"
-        case ewrap.ErrorTypeNotFound:
-            return "NOT_FOUND"
-        case ewrap.ErrorTypeDatabase:
-            return "DATABASE_ERROR"
-        default:
-            return "INTERNAL_ERROR"
-        }
-    }
-    return "UNKNOWN_ERROR"
-}
-
-func getHTTPStatus(err *ewrap.Error) int {
-    if ctx, ok := err.GetMetadata("error_context").(*ewrap.ErrorContext); ok {
-        switch ctx.Type {
-        case ewrap.ErrorTypeValidation:
-            return http.StatusBadRequest
-        case ewrap.ErrorTypePermission:
-            return http.StatusForbidden
-        case ewrap.ErrorTypeNotFound:
-            return http.StatusNotFound
-        default:
-            return http.StatusInternalServerError
-        }
-    }
-    return http.StatusInternalServerError
+    s.breaker.RecordSuccess()
+    return receipt, nil
 }
 ```
 
-This example demonstrates several advanced concepts:
+The handler then translates uniformly:
 
-- Circuit breaker integration for external service calls
-- Error group pooling for efficient error collection
-- Context propagation through the request lifecycle
-- Sophisticated error response handling
-- Panic recovery and logging
-- Error type mapping to HTTP status codes
-- Request-scoped error tracking
+```go
+func (h *Handler) Charge(w http.ResponseWriter, r *http.Request) {
+    receipt, err := h.svc.Charge(r.Context(), parseRequest(r))
+    if err != nil {
+        status := ewrap.HTTPStatus(err)
+        if status == 0 {
+            status = http.StatusInternalServerError
+        }
+        msg := err.Error()
+        if e, ok := err.(*ewrap.Error); ok {
+            msg = e.SafeError()
+        }
+        http.Error(w, msg, status)
+        return
+    }
+
+    writeJSON(w, receipt)
+}
+```
+
+## Retry middleware
+
+```go
+func WithRetry(max int, base time.Duration, op func(context.Context) error) func(context.Context) error {
+    return func(ctx context.Context) error {
+        delay := base
+
+        for attempt := 1; attempt <= max; attempt++ {
+            err := op(ctx)
+            if err == nil {
+                return nil
+            }
+
+            if !ewrap.IsRetryable(err) {
+                return err
+            }
+
+            select {
+            case <-time.After(delay):
+                delay *= 2
+            case <-ctx.Done():
+                return ewrap.Wrap(ctx.Err(), "retry budget exhausted",
+                    ewrap.WithRetryable(false))
+            }
+        }
+
+        // last attempt — return whatever the op returns
+        return op(ctx)
+    }
+}
+```
+
+`IsRetryable` walks the chain and consults `Temporary()` as a fallback,
+so this middleware works with any error source — ewrap or stdlib.
+
+## Validation middleware emitting structured 422
+
+```go
+func writeValidation(w http.ResponseWriter, err error) {
+    eg, ok := err.(*ewrap.ErrorGroup)
+    if !ok {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    body, _ := eg.ToJSON()
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusUnprocessableEntity)
+    _, _ = w.Write([]byte(body))
+}
+```
+
+The `ErrorGroup` JSON envelope already carries every member's `field`
+metadata, so the API consumer gets a clean per-field error list with no
+extra translation.
+
+## Background worker with the breaker
+
+```go
+type Worker struct {
+    queue   <-chan Job
+    cb      *breaker.Breaker
+    logger  ewrap.Logger
+    obs     ewrap.Observer
+}
+
+func (w *Worker) Run(ctx context.Context) {
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case job := <-w.queue:
+            if !w.cb.CanExecute() {
+                w.requeue(job, time.Second)
+                continue
+            }
+
+            if err := w.process(ctx, job); err != nil {
+                w.cb.RecordFailure()
+
+                wrapped := ewrap.Wrap(err, "processing job",
+                    ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError),
+                    ewrap.WithLogger(w.logger),
+                    ewrap.WithObserver(w.obs)).
+                    WithMetadata("job_id", job.ID)
+                wrapped.Log()
+
+                if ewrap.IsRetryable(wrapped) {
+                    w.requeue(job, backoff(job.Attempts))
+                }
+                continue
+            }
+
+            w.cb.RecordSuccess()
+        }
+    }
+}
+```
+
+A single `WithLogger`/`WithObserver` near the construction site
+propagates to wraps via inheritance.
+
+## Fan-out fan-in with `ErrorGroup`
+
+```go
+var pool = ewrap.NewErrorGroupPool(16)
+
+func sweep(ctx context.Context, ids []string) error {
+    eg := pool.Get()
+    defer eg.Release()
+
+    var wg sync.WaitGroup
+    for _, id := range ids {
+        wg.Add(1)
+        go func(id string) {
+            defer wg.Done()
+
+            if err := refresh(ctx, id); err != nil {
+                eg.Add(ewrap.Wrap(err, "refresh failed",
+                    ewrap.WithContext(ctx, ewrap.ErrorTypeNetwork, ewrap.SeverityWarning),
+                    ewrap.WithRetryable(true)).
+                    WithMetadata("id", id))
+            }
+        }(id)
+    }
+    wg.Wait()
+
+    return eg.Join() // single error containing every failure
+}
+```
+
+Each member error preserves its own stack trace, metadata, and HTTP
+status; the aggregator returned by `Join()` is `errors.Is`-walkable.
+
+## Custom domain factory
+
+```go
+package billing
+
+import (
+    "context"
+    "net/http"
+    "time"
+
+    "github.com/hyp3rd/ewrap"
+)
+
+type Code int
+
+const (
+    CodeUnknown Code = iota
+    CodeCardDeclined
+    CodeRateLimited
+)
+
+// New constructs a billing-specific error. NewSkip(1, ...) advances the
+// captured stack past this helper so the trace begins at the caller.
+func New(ctx context.Context, code Code, msg string) *ewrap.Error {
+    base := ewrap.NewSkip(1, msg,
+        ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityWarning))
+
+    switch code {
+    case CodeCardDeclined:
+        return base.
+            WithMetadata("billing_code", code).
+            WithContext(&ewrap.ErrorContext{
+                Type:     ewrap.ErrorTypeExternal,
+                Severity: ewrap.SeverityWarning,
+            })
+    case CodeRateLimited:
+        return base.
+            WithMetadata("billing_code", code).
+            WithMetadata("retry_after_s", 30)
+    }
+
+    return base.WithMetadata("billing_code", code)
+}
+```
+
+Usage:
+
+```go
+return billing.New(ctx, billing.CodeRateLimited, "rate limited at provider")
+```
+
+## OpenTelemetry observer
+
+```go
+import "go.opentelemetry.io/otel/trace"
+
+type otelObserver struct {
+    tracer trace.Tracer
+    ctx    context.Context // captured on construction
+}
+
+func (o *otelObserver) RecordError(message string) {
+    span := trace.SpanFromContext(o.ctx)
+    if !span.IsRecording() {
+        return
+    }
+    span.RecordError(errors.New(message))
+}
+
+err := ewrap.New("payment failed",
+    ewrap.WithObserver(&otelObserver{tracer: tracer, ctx: ctx}))
+err.Log() // span event recorded
+```
+
+For a richer integration, walk the metadata in the observer and attach
+each as a span attribute.
+
+## Test fixtures
+
+```go
+package billing
+
+import (
+    "errors"
+    "testing"
+
+    "github.com/hyp3rd/ewrap"
+)
+
+var errFakeUpstream = errors.New("fake upstream failure")
+
+func TestChargeWrapsUpstreamError(t *testing.T) {
+    t.Parallel()
+
+    svc := &Service{upstream: stubUpstream{err: errFakeUpstream}}
+    _, err := svc.Charge(t.Context(), validRequest())
+
+    if !errors.Is(err, errFakeUpstream) {
+        t.Fatalf("expected upstream error in chain, got %v", err)
+    }
+
+    if got := ewrap.HTTPStatus(err); got != http.StatusBadGateway {
+        t.Errorf("HTTP status: got %d, want %d", got, http.StatusBadGateway)
+    }
+
+    if !ewrap.IsRetryable(err) {
+        t.Error("expected upstream error to be retryable")
+    }
+}
+```
+
+`errors.Is`, `ewrap.HTTPStatus`, and `ewrap.IsRetryable` are the right
+assertions here — none of them touch string-formatted messages.

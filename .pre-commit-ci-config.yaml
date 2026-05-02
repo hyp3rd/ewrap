@@ -12,16 +12,16 @@ repos:
       - id: check-yaml
         files: .*\.(yaml|yml)$
         exclude: mkdocs.yml
-        args: [--allow-multiple-documents]
+        args: [ --allow-multiple-documents ]
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.38.0
     hooks:
       - id: yamllint
         files: \.(yaml|yml)$
-        types: [file, yaml]
+        types: [ file, yaml ]
         entry: yamllint --strict -f parsable
   - repo: https://github.com/streetsidesoftware/cspell-cli
-    rev: v9.4.0
+    rev: v10.0.0
     hooks:
       # Spell check changed files
       - id: cspell
@@ -34,7 +34,7 @@ repos:
           - --no-summary
           - --files
           - .git/COMMIT_EDITMSG
-        stages: [commit-msg]
+        stages: [ commit-msg ]
         always_run: true
   - repo: https://github.com/markdownlint/markdownlint.git
     rev: v0.15.0

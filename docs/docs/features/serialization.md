@@ -1,394 +1,165 @@
-# Serialization and Error Groups
+# Serialization
 
-ewrap provides comprehensive serialization capabilities for both individual errors and error groups, enabling structured export for monitoring systems, APIs, and debugging purposes. The serialization system supports multiple formats and is optimized for performance.
+ewrap can serialize a single `*Error` or a whole `*ErrorGroup` to JSON or
+YAML. The output schema is stable and walks the entire cause chain —
+including non-`*Error` wrappers via `errors.Unwrap` — so transport
+consumers don't lose context across module boundaries.
 
-## Error Group Serialization
-
-### Basic Serialization
-
-Export entire error groups to structured formats:
+## Single error
 
 ```go
-// Create an error group with multiple errors
-pool := ewrap.NewErrorGroupPool(4)
-eg := pool.Get()
-defer eg.Release()
+err := ewrap.New("payment failed",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError),
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message: "Retry after backoff.",
+    })).
+    WithMetadata("provider", "stripe")
 
-// Add various errors
-eg.Add(ewrap.New("database connection failed",
-    ewrap.WithErrorType(ewrap.ErrorTypeDatabase),
-    ewrap.WithSeverity(ewrap.SeverityCritical)))
-
-eg.Add(ewrap.New("validation error",
-    ewrap.WithErrorType(ewrap.ErrorTypeValidation),
-    ewrap.WithSeverity(ewrap.SeverityError)))
-
-// Serialize to JSON
-jsonOutput, err := eg.ToJSON(
+jsonStr, _ := err.ToJSON(
     ewrap.WithTimestampFormat(time.RFC3339),
     ewrap.WithStackTrace(true),
-    ewrap.WithRecoverySuggestion(true))
+)
 
-if err != nil {
-    log.Printf("Serialization failed: %v", err)
-    return
-}
-
-fmt.Println(jsonOutput)
+yamlStr, _ := err.ToYAML(ewrap.WithStackTrace(false))
 ```
 
-### JSON Output Structure
-
-The JSON serialization produces a structured format:
+### Schema
 
 ```json
 {
-  "error_group": {
-    "timestamp": "2024-03-15T14:30:00Z",
-    "total_errors": 2,
-    "errors": [
-      {
-        "message": "database connection failed",
-        "type": "database",
-        "severity": "critical",
-        "timestamp": "2024-03-15T14:30:00Z",
-        "metadata": {},
-        "stack_trace": [
-          {
-            "function": "main.connectDatabase",
-            "file": "/app/main.go",
-            "line": 42,
-            "pc": "0x4567890"
-          }
-        ],
-        "recovery_suggestion": "Check database connectivity and connection pool settings"
-      },
-      {
-        "message": "validation error",
-        "type": "validation",
-        "severity": "error",
-        "timestamp": "2024-03-15T14:30:00Z",
-        "metadata": {},
-        "stack_trace": []
+  "message": "payment failed",
+  "timestamp": "2026-05-02T10:11:12Z",
+  "type": "external",
+  "severity": "error",
+  "stack": "/repo/pay.go:42 example.com/pay.charge\n...",
+  "context": {
+    "request_id": "req-123",
+    "user": "u-1",
+    "component": "billing",
+    "operation": "charge",
+    "file": "/repo/pay.go",
+    "line": 42,
+    "environment": "prod"
+  },
+  "metadata": {
+    "provider": "stripe"
+  },
+  "recovery": {
+    "message": "Retry after backoff.",
+    "actions": [],
+    "documentation": ""
+  },
+  "cause": null
+}
+```
+
+The `cause` field nests the same shape recursively for chained errors.
+
+### Format options
+
+| Option | Effect |
+| --- | --- |
+| `WithTimestampFormat(layout)` | Reformats the `timestamp` field (parses RFC3339 in, emits the supplied layout). Empty layout = leave unchanged. |
+| `WithStackTrace(false)` | Removes the `stack` field from the output. |
+
+Use both together for compact, dashboard-friendly output:
+
+```go
+jsonStr, _ := err.ToJSON(
+    ewrap.WithTimestampFormat(time.DateTime),
+    ewrap.WithStackTrace(false),
+)
+```
+
+## Error groups
+
+```go
+eg := pool.Get()
+defer eg.Release()
+
+eg.Add(httpErr)
+eg.Add(dbErr)
+
+groupJSON, _ := eg.ToJSON()
+groupYAML, _ := eg.ToYAML()
+```
+
+`ErrorGroup` also implements `json.Marshaler` and `yaml.Marshaler` directly,
+so encoders that consume them via `json.Marshal` / `yaml.Marshal` work with
+zero ceremony.
+
+### Group schema
+
+```json
+{
+  "error_count": 2,
+  "timestamp": "2026-05-02T10:11:12Z",
+  "errors": [
+    {
+      "message": "fetching user: net/http: Bad Gateway",
+      "type": "ewrap",
+      "stack_trace": [
+        {"function": "...", "file": "...", "line": 42, "pc": 12345}
+      ],
+      "metadata": {"http_status": 502},
+      "cause": {
+        "message": "net/http: Bad Gateway",
+        "type": "standard"
       }
-    ]
-  }
+    },
+    {
+      "message": "EOF",
+      "type": "standard"
+    }
+  ]
 }
 ```
 
-### YAML Serialization
+`type` is `"ewrap"` for `*Error` members and `"standard"` for everything
+else. `stack_trace` and `metadata` are emitted only for `*Error` members.
 
-Export error groups to YAML format:
+## Cause chain across boundaries
 
-```go
-yamlOutput, err := eg.ToYAML(
-    ewrap.WithTimestampFormat("2006-01-02T15:04:05Z07:00"),
-    ewrap.WithStackTrace(false)) // Exclude stack traces for cleaner output
-
-if err != nil {
-    log.Printf("YAML serialization failed: %v", err)
-    return
-}
-
-fmt.Println(yamlOutput)
-```
-
-### YAML Output Structure
-
-```yaml
-error_group:
-  timestamp: "2024-03-15T14:30:00Z"
-  total_errors: 2
-  errors:
-    - message: "database connection failed"
-      type: "database"
-      severity: "critical"
-      timestamp: "2024-03-15T14:30:00Z"
-      metadata: {}
-      recovery_suggestion: "Check database connectivity and connection pool settings"
-    - message: "validation error"
-      type: "validation"
-      severity: "error"
-      timestamp: "2024-03-15T14:30:00Z"
-      metadata: {}
-```
-
-## Individual Error Serialization
-
-### Enhanced JSON Serialization
-
-Individual errors can be serialized with full context:
+The serializer walks both `*Error` chains and standard wrapped chains:
 
 ```go
-err := ewrap.New("payment processing failed",
-    ewrap.WithErrorType(ewrap.ErrorTypeExternal),
-    ewrap.WithSeverity(ewrap.SeverityCritical),
-    ewrap.WithRecoverySuggestion("Retry with exponential backoff or contact payment provider")).
-    WithMetadata("payment_id", "pay_12345").
-    WithMetadata("amount", 99.99).
-    WithMetadata("currency", "USD")
+inner := ewrap.New("DB unreachable",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
+mid := fmt.Errorf("loading user: %w", inner)            // standard wrapper
+outer := ewrap.Wrap(mid, "handling /users/{id}")        // ewrap on top
 
-jsonOutput, serErr := err.ToJSON(
-    ewrap.WithTimestampFormat(time.RFC3339),
-    ewrap.WithStackTrace(true),
-    ewrap.WithRecoverySuggestion(true))
-
-if serErr != nil {
-    log.Printf("Error serialization failed: %v", serErr)
-    return
-}
-```
-
-### Custom Serialization Options
-
-#### Timestamp Formatting
-
-Configure timestamp formats for different use cases:
-
-```go
-// RFC3339 format (recommended for APIs)
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
-
-// Custom format for logs
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("2006-01-02 15:04:05"))
-
-// Unix timestamp for systems integration
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("unix"))
-```
-
-#### Stack Trace Control
-
-Control stack trace inclusion in serialized output:
-
-```go
-// Include full stack traces (for debugging)
-jsonOutput, _ := err.ToJSON(ewrap.WithStackTrace(true))
-
-// Exclude stack traces (for production logs)
-jsonOutput, _ := err.ToJSON(ewrap.WithStackTrace(false))
-
-// Include only application frames
-jsonOutput, _ := err.ToJSON(
-    ewrap.WithStackTrace(true),
-    ewrap.WithStackFilter(func(frame StackFrame) bool {
-        return strings.Contains(frame.File, "/myapp/") &&
-               !strings.Contains(frame.File, "/vendor/")
-    }))
-```
-
-#### Recovery Suggestions
-
-Control recovery suggestion inclusion:
-
-```go
-// Include recovery suggestions (for operational use)
-jsonOutput, _ := err.ToJSON(ewrap.WithRecoverySuggestion(true))
-
-// Exclude recovery suggestions (for end-user APIs)
-jsonOutput, _ := err.ToJSON(ewrap.WithRecoverySuggestion(false))
-```
-
-## Integration with errors.Join
-
-### Standard Library Compatibility
-
-ewrap error groups integrate seamlessly with Go's standard `errors.Join`:
-
-```go
-// Create error group
 eg := pool.Get()
-eg.Add(err1)
-eg.Add(err2)
-eg.Add(err3)
+eg.Add(outer)
 
-// Get standard errors.Join result
-standardErr := eg.Join()
-
-// Use with standard library functions
-if errors.Is(standardErr, expectedErr) {
-    // Handle specific error
-}
-
-var targetErr *MyCustomError
-if errors.As(standardErr, &targetErr) {
-    // Handle custom error type
-}
-
-// The joined error maintains ewrap capabilities
-if ewrapGroup, ok := standardErr.(*ewrap.ErrorGroup); ok {
-    // Can still serialize the group
-    jsonOutput, _ := ewrapGroup.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
-}
+// outer -> mid (via errors.Unwrap) -> inner (*Error)
+// All three layers appear in the serialized cause chain.
 ```
 
-### Preserving ewrap Features
+This works because `toSerializableError` falls through to `errors.Unwrap`
+for non-`*Error` causes — you don't have to convert everything to ewrap
+upfront.
 
-When using `errors.Join`, ewrap features are preserved:
+## Performance
 
-```go
-eg := pool.Get()
-eg.Add(ewrap.New("error 1", ewrap.WithErrorType(ewrap.ErrorTypeDatabase)))
-eg.Add(ewrap.New("error 2", ewrap.WithErrorType(ewrap.ErrorTypeNetwork)))
+| Benchmark | ns/op | allocs |
+| --- | ---: | ---: |
+| `Error.ToJSON` (with context, two metadata keys) | ~17,000 | ~14 |
+| `Error.ToYAML` (same) | ~250,000 | ~115 |
+| `ErrorGroup.ToJSON` (10 entries) | ~10 µs | ~30 |
 
-// Join preserves individual error metadata
-joinedErr := eg.Join()
+JSON uses `github.com/goccy/go-json`, ~2.5× faster than stdlib
+`encoding/json` on this payload shape with about half the allocations.
 
-// Individual errors maintain their ewrap features
-fmt.Printf("Joined error: %v\n", joinedErr)
+YAML uses `gopkg.in/yaml.v3`. It's significantly slower than JSON; if
+serialization is hot, prefer JSON.
 
-// Can still access individual errors
-for _, err := range eg.Errors() {
-    if ewrapErr, ok := err.(*ewrap.Error); ok {
-        fmt.Printf("Error type: %s, Severity: %s\n",
-            ewrapErr.ErrorType(), ewrapErr.Severity())
-    }
-}
-```
+## Tips
 
-## Performance Optimizations
-
-### Go 1.25+ Features
-
-ewrap leverages modern Go features for efficient serialization:
-
-```go
-// Uses maps.Clone for efficient metadata copying
-func (err *Error) Clone() *Error {
-    cloned := &Error{
-        message:   err.message,
-        errorType: err.errorType,
-        severity:  err.severity,
-        timestamp: err.timestamp,
-        stack:     err.stack,
-        metadata:  maps.Clone(err.metadata), // Efficient copying
-    }
-    return cloned
-}
-
-// Uses slices.Clone for error group copying
-func (eg *ErrorGroup) Clone() *ErrorGroup {
-    return &ErrorGroup{
-        errors: slices.Clone(eg.errors), // Efficient slice copying
-        mutex:  sync.RWMutex{},
-    }
-}
-```
-
-### Memory Management
-
-Serialization is optimized for memory efficiency:
-
-```go
-// Pre-allocated buffers for JSON marshaling
-type SerializationBuffer struct {
-    jsonBuffer  bytes.Buffer
-    yamlBuffer  bytes.Buffer
-}
-
-// Reuse buffers across serialization operations
-func (sb *SerializationBuffer) SerializeToJSON(err *Error) (string, error) {
-    sb.jsonBuffer.Reset() // Reuse existing buffer
-
-    encoder := json.NewEncoder(&sb.jsonBuffer)
-    if err := encoder.Encode(err); err != nil {
-        return "", err
-    }
-
-    return sb.jsonBuffer.String(), nil
-}
-```
-
-## API Integration Examples
-
-### REST API Error Responses
-
-```go
-func handleAPIError(w http.ResponseWriter, r *http.Request, err error) {
-    if ewrapErr, ok := err.(*ewrap.Error); ok {
-        jsonResponse, serErr := ewrapErr.ToJSON(
-            ewrap.WithTimestampFormat(time.RFC3339),
-            ewrap.WithStackTrace(false), // Don't expose stack traces in API
-            ewrap.WithRecoverySuggestion(false)) // Keep suggestions internal
-
-        if serErr != nil {
-            http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-            return
-        }
-
-        w.Header().Set("Content-Type", "application/json")
-
-        // Set appropriate status code based on error type
-        statusCode := getStatusCodeForError(ewrapErr)
-        w.WriteHeader(statusCode)
-
-        w.Write([]byte(jsonResponse))
-        return
-    }
-
-    // Fallback for non-ewrap errors
-    http.Error(w, err.Error(), http.StatusInternalServerError)
-}
-
-func getStatusCodeForError(err *ewrap.Error) int {
-    switch err.ErrorType() {
-    case ewrap.ErrorTypeValidation:
-        return http.StatusBadRequest
-    case ewrap.ErrorTypeNotFound:
-        return http.StatusNotFound
-    case ewrap.ErrorTypePermission:
-        return http.StatusForbidden
-    case ewrap.ErrorTypeDatabase, ewrap.ErrorTypeNetwork:
-        return http.StatusInternalServerError
-    default:
-        return http.StatusInternalServerError
-    }
-}
-```
-
-### Structured Logging Integration
-
-```go
-func logErrorGroup(logger *slog.Logger, eg *ewrap.ErrorGroup) {
-    jsonOutput, err := eg.ToJSON(
-        ewrap.WithTimestampFormat(time.RFC3339),
-        ewrap.WithStackTrace(true),
-        ewrap.WithRecoverySuggestion(true))
-
-    if err != nil {
-        logger.Error("failed to serialize error group", "error", err)
-        return
-    }
-
-    logger.Error("error group occurred",
-        "error_count", len(eg.Errors()),
-        "errors", jsonOutput)
-}
-```
-
-### Monitoring System Integration
-
-```go
-func sendToMonitoring(eg *ewrap.ErrorGroup, metricsClient *prometheus.Client) {
-    for _, err := range eg.Errors() {
-        if ewrapErr, ok := err.(*ewrap.Error); ok {
-            // Send metrics
-            metricsClient.Counter("errors_total").
-                WithLabelValues(
-                    string(ewrapErr.ErrorType()),
-                    string(ewrapErr.Severity())).
-                Inc()
-
-            // Send structured data to monitoring
-            jsonData, serErr := ewrapErr.ToJSON(
-                ewrap.WithTimestampFormat(time.RFC3339),
-                ewrap.WithStackTrace(false))
-
-            if serErr == nil {
-                metricsClient.SendCustomMetric("error_details", jsonData)
-            }
-        }
-    }
-}
-```
-
-The serialization features in ewrap provide comprehensive support for structured error export, enabling seamless integration with monitoring systems, APIs, and debugging workflows while maintaining excellent performance characteristics.
+- For machine consumption, **prefer JSON** — both faster and more widely
+  supported in observability sinks.
+- **Strip stacks** for high-volume sinks (`WithStackTrace(false)`) and
+  attach them in dev/debug paths only.
+- **Use `RFC3339`** as the timestamp format unless you have a strong
+  reason to deviate; it parses cleanly in every common log pipeline.
+- **Set `ErrorContext`** on at least one layer so `type` and `severity`
+  carry signal. Without it both default to `"unknown"` / `"error"`.

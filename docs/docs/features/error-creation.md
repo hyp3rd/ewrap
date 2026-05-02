@@ -1,185 +1,133 @@
 # Error Creation
 
-Understanding how to create errors effectively is fundamental to using the ewrap package. This guide explains the different ways to create errors and when to use each approach.
+ewrap exposes four constructors. They all capture a stack trace at the call
+site (configurable; see [Stack Traces](stack-traces.md)) and return a
+`*Error` that satisfies the `error` interface.
 
-## Basic Error Creation
+| Constructor | Use when |
+| --- | --- |
+| `New(msg, opts...)` | Plain error with a static message |
+| `Newf(format, args...)` | Formatted message; `%w` is honoured |
+| `Wrap(err, msg, opts...)` | Add a layer to an existing error |
+| `Wrapf(err, format, args...)` | Same, with a formatted message |
 
-The most straightforward way to create an error is using the `New` function. However, there's more to consider than just the error message.
+`Wrap` / `Wrapf` are nil-safe: `Wrap(nil, "...")` returns `nil`, so you can
+call them unconditionally.
+
+## `New` — static message
 
 ```go
-// Simple error creation
 err := ewrap.New("user not found")
-
-// With additional context
-err := ewrap.New("user not found",
-    ewrap.WithContext(ctx, ewrap.ErrorTypeNotFound, ewrap.SeverityError),
-    ewrap.WithLogger(logger))
 ```
 
-The `New` function captures a stack trace automatically, allowing you to trace the error's origin later. This is particularly valuable when debugging complex applications where errors might surface far from their source.
+`New` returns a `*Error` with the message stored verbatim. The metadata map
+is **not** allocated until you call `WithMetadata` — most errors never need
+one and pay no cost for it.
 
-## Creating Errors with Options
-
-The `New` function accepts variadic options that configure the error's behavior and context:
+## `Newf` — formatted, `%w`-aware
 
 ```go
-err := ewrap.New("failed to process payment",
-    // Add request context
-    ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityCritical),
-    // Configure logging
+err := ewrap.Newf("user %d not found", id)            // simple format
+err := ewrap.Newf("query %q failed: %w", q, ioErr)    // wraps ioErr
+```
+
+When `format` contains `%w`, `Newf` extracts the wrapped argument as the
+cause so `errors.Is(err, ioErr)` returns true. The full formatted text
+becomes the error's `.Error()` output (matching `fmt.Errorf` semantics).
+
+If `format` contains multiple `%w` verbs, the first wrapped error becomes
+the cause; the others appear in the rendered message.
+
+## `Wrap` — layer on an existing error
+
+```go
+if err := db.Ping(); err != nil {
+    return ewrap.Wrap(err, "syncing replicas")
+}
+```
+
+Every `Wrap` captures **its own** stack frames, so deep chains carry the
+full call history rather than just the innermost site. When the inner error
+is itself a `*Error`, the wrapper inherits its metadata, error context,
+recovery suggestion, retry info, observer, and logger.
+
+## `Wrapf` — formatted wrap
+
+```go
+return ewrap.Wrapf(err, "loading row %d for tenant %s", rowID, tenantID)
+```
+
+## Options at construction time
+
+`New`, `Wrap`, and `WrapSkip` accept variadic `Option`s:
+
+```go
+err := ewrap.New("payment authorization rejected",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError),
+    ewrap.WithHTTPStatus(http.StatusBadGateway),
+    ewrap.WithRetryable(true),
+    ewrap.WithSafeMessage("payment authorization rejected"),
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message:       "Inspect provider's queue and retry after backoff.",
+        Documentation: "https://runbooks.example.com/payments/timeout",
+    }),
+    ewrap.WithRetry(3, 5*time.Second),
     ewrap.WithLogger(logger),
-    // Add retry information
-    ewrap.WithRetry(3, time.Second*5))
+    ewrap.WithObserver(observer),
+    ewrap.WithStackDepth(16), // override default capture depth
+)
 ```
 
-The `Newf` function is similar to `New`, but it allows you to provide a formatted error message:
+A full list lives in [API Reference → Options](../api/options.md).
+
+## Chained metadata
+
+`(*Error).WithMetadata` returns the same instance so calls can chain after
+construction. The map is allocated lazily on the first call.
 
 ```go
-err := ewrap.Newf("failed to process payment: %w", err)
+err := ewrap.New("operation failed").
+    WithMetadata("query", "SELECT * FROM users").
+    WithMetadata("retry_count", 3).
+    WithMetadata("connection_pool_size", 10)
 ```
 
-Each option serves a specific purpose:
-
-- `WithContext`: Adds request context and error classification
-- `WithLogger`: Configures error logging behavior
-- `WithRetry`: Specifies retry behavior for recoverable errors
-
-## Creating Domain-Specific Errors
-
-For domain-specific error cases, you can combine error creation with metadata:
+For typed reads, use the generic accessor:
 
 ```go
-func validateUserAge(age int) error {
-    if age < 18 {
-        return ewrap.New("user is underage",
-            ewrap.WithContext(context.Background(), ewrap.ErrorTypeValidation, ewrap.SeverityError)).
-            WithMetadata("minimum_age", 18).
-            WithMetadata("provided_age", age)
-    }
-    return nil
+count, ok := ewrap.GetMetadataValue[int](err, "retry_count")
+```
+
+## Domain-specific factories
+
+Wrap construction in your own factories to enforce conventions:
+
+```go
+func ErrUnderage(ctx context.Context, age int) *ewrap.Error {
+    return ewrap.NewSkip(1, "user is underage",
+        ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError),
+        ewrap.WithHTTPStatus(http.StatusUnprocessableEntity),
+    ).
+        WithMetadata("minimum_age", 18).
+        WithMetadata("provided_age", age)
 }
 ```
 
-## Best Practices for Error Creation
+`NewSkip(skip, ...)` advances the captured stack by `skip` frames, so the
+trace starts at the caller of your factory rather than inside it. The
+companion `WrapSkip(skip, err, ...)` does the same for wraps.
 
-When creating errors, follow these guidelines for maximum effectiveness:
+## Thread safety
 
-1. **Be Specific**: Error messages should clearly indicate what went wrong:
+All constructors and `*Error` accessors are safe for concurrent use. The
+metadata map is guarded by an `RWMutex`; everything else is set once at
+construction and never mutated, so reads (including cached `Error()` and
+`Stack()`) are lock-free after the first call.
 
-    ```go
-    // Good
-    err := ewrap.New("database connection timeout after 5 seconds")
+## Performance notes
 
-    // Not as helpful
-    err := ewrap.New("database error")
-    ```
-
-1. **Include Relevant Context**: Add context that helps with debugging:
-
-    ```go
-    err := ewrap.New("failed to update user profile",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError)).
-        WithMetadata("user_id", userID).
-        WithMetadata("fields_updated", fields)
-    ```
-
-1. **Use Appropriate Error Types**: Choose error types that match the situation:
-
-    ```go
-    // For validation errors
-    err := ewrap.New("invalid email format",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityWarning))
-
-    // For system errors
-    err := ewrap.New("failed to connect to database",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
-    ```
-
-1. **Consider Recovery Options**: Include information that helps with recovery:
-
-    ```go
-    err := ewrap.New("rate limit exceeded",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityWarning)).
-        WithMetadata("retry_after", time.Now().Add(time.Minute)).
-        WithMetadata("current_rate", currentRate).
-        WithMetadata("limit", rateLimit)
-    ```
-
-## Working with Stack Traces
-
-Every error created with `New` automatically captures a stack trace:
-
-```go
-func processOrder(orderID string) error {
-    err := ewrap.New("order processing failed")
-    fmt.Println(err.Stack()) // Prints the stack trace
-    return err
-}
-```
-
-The stack trace includes function names, file names, and line numbers, making it easier to trace the error's origin.
-
-## Error Creation in Tests
-
-When writing tests, you might want to create errors for specific scenarios:
-
-```go
-func TestOrderProcessing(t *testing.T) {
-    // Create a test error
-    testErr := ewrap.New("simulated database error",
-        ewrap.WithContext(context.Background(), ewrap.ErrorTypeDatabase, ewrap.SeverityError))
-
-    // Mock database returns our test error
-    mockDB := &MockDatabase{
-        QueryFunc: func() error {
-            return testErr
-        },
-    }
-
-    err := processOrder(mockDB, "order123")
-
-    // Verify error handling
-    if !errors.Is(err, testErr) {
-        t.Errorf("expected error %v, got %v", testErr, err)
-    }
-}
-```
-
-## Thread Safety
-
-All error creation operations in ewrap are thread-safe. You can safely create errors from multiple goroutines:
-
-```go
-func processItems(items []string) []error {
-    var wg sync.WaitGroup
-    errors := make([]error, 0)
-    var mu sync.Mutex
-
-    for _, item := range items {
-        wg.Add(1)
-        go func(item string) {
-            defer wg.Done()
-            if err := process(item); err != nil {
-                mu.Lock()
-                errors = append(errors, ewrap.New("processing failed",
-                    ewrap.WithMetadata("item", item)))
-                mu.Unlock()
-            }
-        }(item)
-    }
-
-    wg.Wait()
-    return errors
-}
-```
-
-## Performance Considerations
-
-Error creation in ewrap is optimized for both CPU and memory usage. However, consider these performance tips:
-
-1. Reuse error types for common errors instead of creating new ones
-1. Only capture stack traces when necessary
-1. Be mindful of metadata quantity in high-throughput scenarios
-1. Use error pools for frequent error creation scenarios
-
-Remember: error creation should be reserved for exceptional cases. Don't use errors for normal control flow in your application.
+- The metadata map is allocated on first write; errors with no metadata pay
+  for one allocation (the `*Error` struct) plus the stack PCs slice.
+- `Error()` and `Stack()` cache their formatted output via `sync.Once`.
+- `(*Error).Format` and `LogValue` reuse those caches — `fmt.Printf("%v", err)`
+  and `slog.Error(..., "err", err)` are both cheap after the first format.

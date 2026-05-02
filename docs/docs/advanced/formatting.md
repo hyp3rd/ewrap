@@ -1,335 +1,138 @@
-# Error Formatting
+# Formatting
 
-Error formatting in ewrap provides flexible ways to present errors in different formats and contexts with proper timestamp formatting and enhanced serialization capabilities. This capability is crucial for logging, debugging, API responses, and system integration. Let's explore how to effectively format errors to meet various needs in your application.
+Three ways to render an `*Error` for output. Pick the one that matches
+the consumer.
 
-## Understanding Error Formatting
+| Consumer | Use |
+| --- | --- |
+| Human reader (terminal, dev logs) | `fmt.Printf("%+v", err)` |
+| Structured log sink (slog/zap/zerolog) | `LogValuer` (automatic) or `(*Error).Log` |
+| Machine pipeline (transport, dashboard) | `(*Error).ToJSON()` / `ToYAML()` |
 
-When an error occurs in your system, you might need to present it in different ways depending on the context:
+## `fmt.Formatter`
 
-- As JSON for API responses with proper timestamp formatting
-- As YAML for configuration-related errors
-- As structured text for logging with recovery suggestions
-- As user-friendly messages for end users
-- As serialized error groups for monitoring systems
-
-ewrap provides comprehensive formatting options to handle all these cases while maintaining the rich context and metadata associated with your errors.
-
-## Enhanced JSON Formatting
-
-JSON formatting now includes proper timestamp formatting and recovery suggestions:
+`*Error` implements `fmt.Formatter` and supports four verbs:
 
 ```go
-func handleAPIError(w http.ResponseWriter, err error) {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Convert error to JSON with enhanced formatting
-        jsonOutput, err := wrappedErr.ToJSON(
-            ewrap.WithTimestampFormat(time.RFC3339), // Proper timestamp formatting
-            ewrap.WithStackTrace(true),
-            ewrap.WithRecoverySuggestion(true), // Include recovery guidance
-        )
+err := ewrap.New("boom").WithMetadata("k", "v")
 
-        if err != nil {
-            // Handle formatting error
-            http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-            return
-        }
-
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        w.Write([]byte(jsonOutput))
-    }
-}
+fmt.Printf("%s\n", err)   // boom
+fmt.Printf("%v\n", err)   // boom
+fmt.Printf("%q\n", err)   // "boom"
+fmt.Printf("%+v\n", err)  // boom\n<filtered stack>\n
 ```
 
-### Enhanced JSON Structure
+| Verb | Output |
+| --- | --- |
+| `%s`, `%v` | `Error()` |
+| `%q` | quoted `Error()` |
+| `%+v` | `Error()` + newline + `Stack()` |
 
-The resulting JSON now includes proper timestamp formatting and recovery suggestions:
+Both `Error()` and `Stack()` are cached, so formatting is essentially free
+after the first call.
 
-```json
-{
-    "message": "failed to process user order",
-    "timestamp": "2024-03-15T14:30:00Z",
-    "type": "database",
-    "severity": "critical",
-    "stack_trace": [
-        {
-            "function": "main.processOrder",
-            "file": "/app/main.go",
-            "line": 42,
-            "pc": "0x4567890"
-        }
-    ],
-    "metadata": {
-        "user_id": "12345",
-        "order_id": "ord_789",
-        "retry_count": 3
-    },
-    "recovery_suggestion": "Check database connectivity and retry with exponential backoff"
-}
-```
+## `slog.LogValuer`
 
-## Timestamp Formatting Options
-
-### Standard Formats
-
-ewrap supports various timestamp formats:
+`*Error` implements `slog.LogValuer`, so passing it as a value in any
+`log/slog` call emits structured fields:
 
 ```go
-// RFC3339 format (recommended for APIs and JSON)
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat(time.RFC3339))
-// Result: "2024-03-15T14:30:00Z"
-
-// RFC3339Nano for high precision
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat(time.RFC3339Nano))
-// Result: "2024-03-15T14:30:00.123456789Z"
-
-// Kitchen format for human-readable logs
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat(time.Kitchen))
-// Result: "2:30PM"
-
-// Custom format for specific requirements
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("2006-01-02 15:04:05"))
-// Result: "2024-03-15 14:30:00"
+slog.Error("payment failed", "err", err)
 ```
 
-### Unix Timestamp Support
+The handler receives an attribute group with:
 
-For systems integration requiring Unix timestamps:
+- `message` (always)
+- `type`, `severity` (if `WithContext` was set)
+- `component`, `operation`, `request_id` (if non-empty in context)
+- `recovery` (if `WithRecoverySuggestion` was set)
+- `cause` (if non-nil)
+- one attribute per metadata key
+
+If you'd rather log via `(*Error).Log` (using an attached `ewrap.Logger`),
+the same fields appear:
 
 ```go
-// Unix timestamp (seconds since epoch)
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("unix"))
-// Result: "1710507000"
-
-// Unix timestamp with milliseconds
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("unix_milli"))
-// Result: "1710507000123"
-
-// Unix timestamp with microseconds
-jsonOutput, _ := err.ToJSON(ewrap.WithTimestampFormat("unix_micro"))
-// Result: "1710507000123456"
+err := ewrap.New("boom",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
+    ewrap.WithLogger(logger))
+err.Log()
 ```
 
-## YAML Formatting with Recovery Suggestions
+`Log` writes a single record at error level.
 
-YAML formatting now supports recovery suggestions and enhanced metadata:
+## JSON and YAML
 
 ```go
-func logConfigurationError(err error, logger Logger) {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Convert error to YAML with recovery suggestions
-        yamlOutput, err := wrappedErr.ToYAML(
-            ewrap.WithTimestampFormat(time.RFC3339),
-            ewrap.WithStackTrace(true),
-            ewrap.WithRecoverySuggestion(true),
-        )
+jsonStr, _ := err.ToJSON(
+    ewrap.WithTimestampFormat(time.RFC3339),
+    ewrap.WithStackTrace(true),
+)
 
-        if err != nil {
-            logger.Error("failed to format error", "error", err)
-            return
-        }
-
-        logger.Error("configuration error occurred", "details", yamlOutput)
-    }
-}
+yamlStr, _ := err.ToYAML(ewrap.WithStackTrace(false))
 ```
 
-### Enhanced YAML Structure
+The schema is documented in [Serialization](../features/serialization.md).
+Two format options:
 
-The formatted YAML now includes recovery suggestions:
+| Option | Effect |
+| --- | --- |
+| `WithTimestampFormat(layout)` | Reformat the `timestamp` field. Empty = leave unchanged. |
+| `WithStackTrace(false)` | Strip the `stack` field. |
 
-```yaml
-message: failed to load configuration
-timestamp: "2024-03-15T14:30:00Z"
-type: configuration
-severity: critical
-stack_trace:
-  - function: main.loadConfig
-    file: /app/config.go
-    line: 25
-    pc: "0x4567890"
-  - function: main.initialize
-    file: /app/main.go
-    line: 15
-    pc: "0x4567891"
-metadata:
-    config_file: /etc/myapp/config.yaml
-    invalid_fields:
-        - database.host
-        - database.port
-recovery_suggestion: "Check configuration file format and validate required fields"
-```
+For an `ErrorGroup`, the same options apply via `(*ErrorGroup).ToJSON()`
+/ `ToYAML()`. The group also implements `json.Marshaler` and
+`yaml.Marshaler`, so generic encoders that consume them via
+`json.Marshal` / `yaml.Marshal` work without ceremony.
 
-## Custom Formatting
+## Picking the timestamp format
 
-Sometimes you need to create custom formats for specific use cases. Here's how to build custom formatters:
+Default: RFC3339 (e.g. `2026-05-02T10:11:12Z`). Most log pipelines parse
+that natively. Use the friendlier alternatives only when emitting
+direct-to-human output:
 
 ```go
-type ErrorFormatter struct {
-    TimestampFormat string
-    IncludeStack    bool
-    IncludeMetadata bool
-    MaxStackDepth   int
-}
-
-func NewErrorFormatter() *ErrorFormatter {
-    return &ErrorFormatter{
-        TimestampFormat: time.RFC3339,
-        IncludeStack:    true,
-        IncludeMetadata: true,
-        MaxStackDepth:   10,
-    }
-}
-
-func (f *ErrorFormatter) Format(err *ewrap.Error) map[string]any {
-    // Create base error information
-    formatted := map[string]any{
-        "message":   err.Error(),
-        "timestamp": time.Now().Format(f.TimestampFormat),
-    }
-
-    // Add stack trace if enabled
-    if f.IncludeStack {
-        formatted["stack"] = f.formatStack(err.Stack())
-    }
-
-    // Add metadata if enabled
-    if f.IncludeMetadata {
-        metadata := make(map[string]any)
-        // Extract and format metadata...
-        formatted["metadata"] = metadata
-    }
-
-    return formatted
-}
-
-func (f *ErrorFormatter) formatStack(stack string) []string {
-    lines := strings.Split(stack, "\n")
-    if len(lines) > f.MaxStackDepth {
-        lines = lines[:f.MaxStackDepth]
-    }
-    return lines
-}
+err.ToJSON(ewrap.WithTimestampFormat(time.DateTime))      // 2026-05-02 10:11:12
+err.ToJSON(ewrap.WithTimestampFormat("2006-01-02"))       // 2026-05-02
 ```
 
-## User-Friendly Error Messages
+## Stripping stacks for hot paths
 
-When presenting errors to end users, you often need to transform technical errors into user-friendly messages while preserving the technical details for logging:
+A formatted stack trace adds a few hundred bytes to each serialized
+record. If you serialize on a high-volume path (e.g. error metrics
+shipping), strip the stack and capture it only in dev/debug paths:
 
 ```go
-type UserErrorFormatter struct {
-    translations map[ErrorType]string
-    logger       Logger
-}
+const includeStack = false // toggle in your config
 
-func NewUserErrorFormatter(logger Logger) *UserErrorFormatter {
-    return &UserErrorFormatter{
-        translations: map[ErrorType]string{
-            ErrorTypeValidation:    "The provided information is invalid",
-            ErrorTypeNotFound:      "The requested resource could not be found",
-            ErrorTypePermission:    "You don't have permission to perform this action",
-            ErrorTypeDatabase:      "A system error occurred",
-            ErrorTypeNetwork:       "Connection issues detected",
-            ErrorTypeConfiguration: "System configuration error",
-        },
-        logger: logger,
-    }
-}
-
-func (f *UserErrorFormatter) FormatForUser(err error) string {
-    // Always log the full technical error
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        f.logger.Error("error occurred",
-            "technical_details", wrappedErr.ToJSON())
-
-        // Get error context
-        ctx := getErrorContext(wrappedErr)
-
-        // Return translated message
-        if msg, ok := f.translations[ctx.Type]; ok {
-            return msg
-        }
-    }
-
-    // Default message for unknown errors
-    return "An unexpected error occurred"
-}
+opts := []ewrap.FormatOption{ewrap.WithStackTrace(includeStack)}
+jsonStr, _ := err.ToJSON(opts...)
 ```
 
-## Best Practices for Error Formatting
+## SafeError for external sinks
 
-### 1. Security-Conscious Formatting
-
-Be careful about what information you expose in different contexts:
+When the rendered output may leave your trust boundary (third-party log
+ingestion, customer-facing responses), use `SafeError()`:
 
 ```go
-func formatErrorResponse(err error, internal bool) any {
-    wrappedErr, ok := err.(*ewrap.Error)
-    if !ok {
-        return map[string]string{"message": "Internal Server Error"}
-    }
-
-    if internal {
-        // Full details for internal logging
-        return map[string]any{
-            "message":   wrappedErr.Error(),
-            "stack":     wrappedErr.Stack(),
-            "metadata":  wrappedErr.GetAllMetadata(),
-            "type":      getErrorContext(wrappedErr).Type,
-            "severity": getErrorContext(wrappedErr).Severity,
-        }
-    }
-
-    // Limited information for external responses
-    return map[string]string{
-        "message": sanitizeErrorMessage(wrappedErr.Error()),
-        "code":    getPublicErrorCode(wrappedErr),
-    }
-}
+external.Log(err.SafeError()) // redacted variant
+internal.Log(err.Error())     // full detail
 ```
 
-### 2. Consistent Format Structure
+See [Operational Features](../features/operational.md) for how to attach
+safe messages.
 
-Maintain consistent error format structures across your application:
+## Performance summary
 
-```go
-type StandardErrorResponse struct {
-    Message   string                 `json:"message"`
-    Code      string                 `json:"code"`
-    Details   map[string]any `json:"details,omitempty"`
-    RequestID string                 `json:"request_id,omitempty"`
-    Timestamp string                 `json:"timestamp"`
-}
+| Operation | ns/op | allocs |
+| --- | ---: | ---: |
+| `fmt.Sprintf("%v", err)` (cached) | ~30 | 1 (output buffer) |
+| `fmt.Sprintf("%+v", err)` (cached) | ~70 | 1 |
+| `(*Error).Log` (with metadata) | ~500 | a few (logger-dependent) |
+| `(*Error).ToJSON` | ~17,000 | ~14 |
+| `(*Error).ToYAML` | ~250,000 | ~115 |
 
-func NewStandardErrorResponse(err error, requestID string) StandardErrorResponse {
-    return StandardErrorResponse{
-        Message:   getErrorMessage(err),
-        Code:      getErrorCode(err),
-        Details:   getErrorDetails(err),
-        RequestID: requestID,
-        Timestamp: time.Now().UTC().Format(time.RFC3339),
-    }
-}
-```
-
-### 3. Context-Aware Formatting
-
-Adjust formatting based on the execution context:
-
-```go
-func formatErrorByEnvironment(err error, env string) any {
-    switch env {
-    case "development":
-        // Include everything in development
-        return formatWithFullDetails(err)
-    case "testing":
-        // Include stack traces but sanitize sensitive data
-        return formatForTesting(err)
-    case "production":
-        // Minimal public information
-        return formatForProduction(err)
-    default:
-        return formatWithDefaultSettings(err)
-    }
-}
-```
+The first call to `Error()` and `Stack()` does the formatting; subsequent
+calls hit the cache. JSON output is dominated by `goccy/go-json` (already
+~2.5× faster than stdlib for this payload shape). YAML is significantly
+slower — prefer JSON wherever the consumer accepts it.
