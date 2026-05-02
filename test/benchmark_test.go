@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/ewrap"
+	"github.com/hyp3rd/ewrap/breaker"
 )
 
 const (
@@ -184,7 +185,7 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 }
 
 func benchBreakerRecordFailure(b *testing.B) {
-	cb := ewrap.NewCircuitBreaker("test", benchBreakerFailLimit, time.Second)
+	cb := breaker.New("test", benchBreakerFailLimit, time.Second)
 
 	b.ReportAllocs()
 
@@ -198,7 +199,7 @@ func benchBreakerRecordFailure(b *testing.B) {
 }
 
 func benchBreakerConcurrent(b *testing.B) {
-	cb := ewrap.NewCircuitBreaker("test", benchBreakerLargeMax, time.Second)
+	cb := breaker.New("test", benchBreakerLargeMax, time.Second)
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {

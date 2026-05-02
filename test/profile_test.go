@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hyp3rd/ewrap"
+	"github.com/hyp3rd/ewrap/breaker"
 )
 
 const (
@@ -197,7 +198,7 @@ func profileMemory() {
 func profileGoroutinesFn() {
 	done := make(chan bool)
 
-	cb := ewrap.NewCircuitBreaker("test", profileBreakerMax, time.Second)
+	cb := breaker.New("test", profileBreakerMax, time.Second)
 
 	for i := range profileGoroutines {
 		go runProfileGoroutine(cb, i, done)
@@ -208,7 +209,7 @@ func profileGoroutinesFn() {
 	}
 }
 
-func runProfileGoroutine(cb *ewrap.CircuitBreaker, id int, done chan<- bool) {
+func runProfileGoroutine(cb *breaker.Breaker, id int, done chan<- bool) {
 	for j := range profileGoroutineWork {
 		if cb.CanExecute() {
 			err := ewrap.New(fmt.Sprintf("error %d-%d", id, j))

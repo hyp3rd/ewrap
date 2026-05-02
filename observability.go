@@ -1,19 +1,12 @@
 package ewrap
 
-// Observer defines hooks for observing errors and circuit breaker state transitions.
+// Observer receives notifications about errors. Implementations must be
+// goroutine-safe; calls happen synchronously from the goroutine that invoked
+// (*Error).Log.
+//
+// Breaker-state observation lives in the ewrap/breaker subpackage so
+// consumers who only need error wrapping do not depend on it.
 type Observer interface {
 	// RecordError is called when an error is logged.
 	RecordError(message string)
-	// RecordCircuitStateTransition is called when a circuit breaker changes state.
-	RecordCircuitStateTransition(name string, from, to CircuitState)
 }
-
-// noopObserver provides a no-op implementation of the Observer interface.
-type noopObserver struct{}
-
-func newNoopObserver() Observer {
-	return noopObserver{}
-}
-
-func (noopObserver) RecordError(string)                                              {}
-func (noopObserver) RecordCircuitStateTransition(string, CircuitState, CircuitState) {}
