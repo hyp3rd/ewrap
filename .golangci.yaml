@@ -53,16 +53,17 @@ linters:
     - gomodguard_v2
   disable:
     - depguard
-    - embeddedstructfieldcheck
+    # - embeddedstructfieldcheck
     - exhaustruct
-    - gomoddirectives
+    # - gomoddirectives
     - gomodguard
     - ireturn
-    - lll
+    # - lll
+    - nolintlint
     - nonamedreturns
-    - recvcheck
-    - tagliatelle
-    - tagalign
+    # - recvcheck
+    # - tagliatelle
+    # - tagalign
     - testpackage
     - wsl
 
@@ -173,12 +174,41 @@ linters:
           disabled: false
           exclude: [ "" ]
 
+    tagliatelle:
+      # Checks the struct tag name case.
+      case:
+        # Defines the association between tag name and case.
+        # Any struct tag name can be used.
+        # Supported string cases:
+        # - `camel`
+        # - `pascal`
+        # - `kebab`
+        # - `snake`
+        # - `upperSnake`
+        # - `goCamel`
+        # - `goPascal`
+        # - `goKebab`
+        # - `goSnake`
+        # - `upper`
+        # - `lower`
+        # - `header`
+        rules:
+          json: snake
+          yaml: snake
+          # xml: camel
+          # toml: camel
+          # bson: camel
+          # avro: snake
+          # mapstructure: kebab
+          # env: upperSnake
+          # envconfig: upperSnake
+          # whatever: snake
+
     wrapcheck:
       # An array of strings that specify globs of packages to ignore.
       # Default: []
       ignore-package-globs:
         - github.com/hyp3rd/*
-        - github.com/gofiber/fiber/*
 
     varnamelen:
       # The longest distance, in source lines, that is being considered a "small scope".

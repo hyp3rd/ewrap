@@ -7,6 +7,7 @@ golangci
 gopkg
 monkeypatch
 myapp
+paralleltest
 Println
 retryable
 Retryable

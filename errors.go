@@ -1,5 +1,3 @@
-// Package ewrap provides enhanced error handling capabilities with stack traces,
-// error wrapping, custom error types, and logging integration.
 package ewrap
 
 import (

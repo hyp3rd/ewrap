@@ -94,8 +94,11 @@ func goroutineProfileCase() profileCase {
 // forceGC explicitly triggers garbage collection so heap profiles capture a
 // post-collection snapshot. Profile-only helper; production code never needs
 // this.
+//
+//nolint:revive
 func forceGC() {
-	runtime.GC() //nolint:revive // explicit GC is intentional for profile snapshots
+	// explicit GC is intentional for profile snapshots.
+	runtime.GC()
 }
 
 // TestProfileErrorOperations runs a comprehensive profiling suite for error operations.
@@ -103,7 +106,7 @@ func forceGC() {
 // of our error handling implementation.
 //
 // This test mutates the global runtime.MemProfileRate and emits profile files
-// to the working directory, so it cannot be parallelised.
+// to the working directory, so it cannot be parallelized.
 //
 //nolint:paralleltest // mutates runtime.MemProfileRate global state
 func TestProfileErrorOperations(t *testing.T) {
