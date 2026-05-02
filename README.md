@@ -1,6 +1,11 @@
 # ewrap
 
-[![Go](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml/badge.svg)](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml) [![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://hyp3rd.github.io/ewrap/) [![Go Report Card](https://goreportcard.com/badge/github.com/hyp3rd/ewrap)](https://goreportcard.com/report/github.com/hyp3rd/ewrap) [![Go Reference](https://pkg.go.dev/badge/github.com/hyp3rd/ewrap.svg)](https://pkg.go.dev/github.com/hyp3rd/ewrap) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) ![GitHub Sponsors](https://img.shields.io/github/sponsors/hyp3rd/sponsors)
+[![Go](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml/badge.svg)](https://github.com/hyp3rd/ewrap/actions/workflows/go.yml)
+[![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://hyp3rd.github.io/ewrap/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hyp3rd/ewrap)](https://goreportcard.com/report/github.com/hyp3rd/ewrap)
+[![Go Reference](https://pkg.go.dev/badge/github.com/hyp3rd/ewrap.svg)](https://pkg.go.dev/github.com/hyp3rd/ewrap)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![GitHub Sponsors](https://img.shields.io/github/sponsors/hyp3rd/sponsors)
 
 A lightweight, modern Go error library: rich context, stack traces, structured
 serialization, `slog`/`fmt.Formatter` integration, HTTP/retry classification,
@@ -9,7 +14,8 @@ footprint (yaml + a fast JSON encoder, nothing else).
 
 ## Highlights
 
-- **Stdlib-first.** Two direct deps in the core module: [`gopkg.in/yaml.v3`][yaml] for YAML,
+- **Stdlib-first.** Two direct deps in the core module:
+  [`gopkg.in/yaml.v3`][yaml] for YAML,
   [`github.com/goccy/go-json`][goccy] for the serialization hot path (~2.5× faster than `encoding/json`).
 - **Correct by default.** `errors.Is` / `errors.As` work via `Unwrap()`; `Newf` honors `%w`;
   every wrap captures its own stack frames.
