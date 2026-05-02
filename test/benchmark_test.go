@@ -42,7 +42,7 @@ func BenchmarkNew(b *testing.B) {
 	b.Run("WithLogger", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = ewrap.New("error with logger",
 				ewrap.WithLogger(logger))
 		}
@@ -70,7 +70,7 @@ func BenchmarkWrap(b *testing.B) {
 	b.Run("Simple", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = ewrap.Wrap(baseErr, "wrapped error")
 		}
 	})
@@ -78,7 +78,7 @@ func BenchmarkWrap(b *testing.B) {
 	b.Run("NestedWraps", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			err1 := ewrap.Wrap(baseErr, "level 1")
 			err2 := ewrap.Wrap(err1, "level 2")
 			_ = ewrap.Wrap(err2, "level 3")
@@ -88,7 +88,7 @@ func BenchmarkWrap(b *testing.B) {
 	b.Run("WithContext", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = ewrap.Wrap(baseErr, "wrapped with context",
 				ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
 		}
@@ -97,7 +97,7 @@ func BenchmarkWrap(b *testing.B) {
 	b.Run("FullFeatures", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = ewrap.Wrap(baseErr, "full featured wrap",
 				ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError),
 				ewrap.WithLogger(logger)).
@@ -111,7 +111,7 @@ func BenchmarkErrorGroup(b *testing.B) {
 	b.Run("AddErrors", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			group := ewrap.NewErrorGroup()
 
 			for j := range 10 {
@@ -151,7 +151,7 @@ func BenchmarkFormatting(b *testing.B) {
 	b.Run("ToJSONWithOptions", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_, _ = err.ToJSON(
 				ewrap.WithTimestampFormat(time.RFC3339),
 				ewrap.WithStackTrace(true),
@@ -175,7 +175,7 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			cb.RecordFailure()
 
 			if i%5 == 0 {
@@ -204,7 +204,7 @@ func BenchmarkMetadataOperations(b *testing.B) {
 	b.Run("AddMetadata", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			err := ewrap.New("test error")
 			for j := range 5 {
 				err.WithMetadata(fmt.Sprintf("key%d", j), j)
@@ -221,7 +221,7 @@ func BenchmarkMetadataOperations(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_, _ = err.GetMetadata("key3")
 		}
 	})

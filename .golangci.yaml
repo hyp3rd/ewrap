@@ -50,17 +50,20 @@ linters:
   default: all
   enable:
     - wsl_v5
+    - gomodguard_v2
   disable:
     - depguard
     - embeddedstructfieldcheck
     - exhaustruct
     - gomoddirectives
+    - gomodguard
     - ireturn
     - lll
     - nonamedreturns
     - recvcheck
     - tagliatelle
     - tagalign
+    - testpackage
     - wsl
 
   settings:
@@ -137,20 +140,20 @@ linters:
           disabled: false
           arguments:
             - max-lit-count: "3"
-              allow-strs: '"","-"'
+              allow-strs: "\"\",\"-\""
               allow-ints: "-1,0,1,2,10,1024,0o600,0o644,0o700,0o755,0666,0755"
               allow-floats: "0.0,1.0"
 
         - name: cognitive-complexity
           severity: warning
           disabled: false
-          arguments: [10]
+          arguments: [ 10 ]
 
         - name: cyclomatic
-          arguments: [15]
+          arguments: [ 15 ]
 
         - name: max-public-structs
-          arguments: [10]
+          arguments: [ 10 ]
 
         - name: nested-structs
           disabled: true
@@ -159,7 +162,7 @@ linters:
           disabled: true
 
         - name: line-length-limit
-          arguments: [140]
+          arguments: [ 140 ]
 
         - name: var-naming
           disabled: true
@@ -167,7 +170,7 @@ linters:
         - name: package-comments
           severity: warning
           disabled: false
-          exclude: [""]
+          exclude: [ "" ]
 
     wrapcheck:
       # An array of strings that specify globs of packages to ignore.

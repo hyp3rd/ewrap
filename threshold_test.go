@@ -111,9 +111,9 @@ func TestCircuitBreakerCanExecute(t *testing.T) {
 	}
 
 	// Verify state is now half-open
-	cb.mu.RLock()
+	cb.mu.Lock()
 	state := cb.state
-	cb.mu.RUnlock()
+	cb.mu.Unlock()
 
 	if state != CircuitHalfOpen {
 		t.Errorf("Expected state %v after timeout, got %v", CircuitHalfOpen, state)
@@ -144,11 +144,9 @@ func TestCircuitBreakerOnStateChange(t *testing.T) {
 		mu.Unlock()
 	})
 
-	// Record failure to trigger state change
+	// Record failure to trigger state change. Callback fires synchronously
+	// once the breaker lock has been released, so no sleep is needed.
 	cb.RecordFailure()
-
-	// Give goroutine time to execute
-	time.Sleep(10 * time.Millisecond)
 
 	mu.Lock()
 
@@ -172,26 +170,21 @@ func TestCircuitBreakerOnStateChange(t *testing.T) {
 	mu.Unlock()
 }
 
-func TestCircuitBreakerTransitionTo(t *testing.T) {
+func TestCircuitBreakerTransitionViaPublicAPI(t *testing.T) {
 	cb := NewCircuitBreaker("test", 1, 5*time.Second)
 
-	// Test transition from closed to open
-	cb.mu.Lock()
-	cb.transitionTo(CircuitOpen)
-	cb.mu.Unlock()
+	// Single failure trips the circuit (maxFailures=1).
+	cb.RecordFailure()
 
 	if cb.state != CircuitOpen {
 		t.Errorf("Expected state %v, got %v", CircuitOpen, cb.state)
 	}
 
-	// Test no transition when same state
-	cb.mu.Lock()
-	oldState := cb.state
-	cb.transitionTo(CircuitOpen)
-	cb.mu.Unlock()
+	// A second failure does not change state away from Open.
+	cb.RecordFailure()
 
-	if cb.state != oldState {
-		t.Error("Expected no state change when transitioning to same state")
+	if cb.state != CircuitOpen {
+		t.Error("Expected state to remain Open on subsequent failure")
 	}
 }
 

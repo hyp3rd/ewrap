@@ -1,12 +1,12 @@
 package ewrap
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 
@@ -181,6 +181,7 @@ func TestToJSON(t *testing.T) {
 
 	// Verify it's valid JSON
 	var output ErrorOutput
+
 	unmarshalErr := json.Unmarshal([]byte(jsonStr), &output)
 	if unmarshalErr != nil {
 		t.Errorf("Failed to unmarshal JSON: %v", unmarshalErr)
@@ -221,6 +222,7 @@ func TestToYAML(t *testing.T) {
 
 	// Verify it's valid YAML
 	var output ErrorOutput
+
 	unmarshalErr := yaml.Unmarshal([]byte(yamlStr), &output)
 	if unmarshalErr != nil {
 		t.Errorf("Failed to unmarshal YAML: %v", unmarshalErr)

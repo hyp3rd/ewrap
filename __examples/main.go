@@ -3,27 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
-	"github.com/rs/zerolog"
-	"github.com/sirupsen/logrus"
-	"go.uber.org/zap"
-
 	"github.com/hyp3rd/ewrap"
-	"github.com/hyp3rd/ewrap/pkg/logger/adapters"
+	ewrapslog "github.com/hyp3rd/ewrap/slog"
 )
 
 func main() {
-	// Initialize different loggers
-	zapLogger, _ := zap.NewProduction()
-	logrusLogger := logrus.New()
-	zerologLogger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-
-	// Create adapters
-	zapAdapter := adapters.NewZapAdapter(zapLogger)
-	logrusAdapter := adapters.NewLogrusAdapter(logrusLogger)
-	zerologAdapter := adapters.NewZerologAdapter(zerologLogger)
+	logger := ewrapslog.New(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	// Create context with request ID
 	ctx := context.WithValue(context.Background(), "request_id", "123")
@@ -31,7 +20,7 @@ func main() {
 	// Create and format an error
 	err := ewrap.New("database connection failed",
 		ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
-		ewrap.WithLogger(zapAdapter)).
+		ewrap.WithLogger(logger)).
 		WithMetadata("host", "db.example.com").
 		WithMetadata("port", 5432)
 
@@ -51,12 +40,8 @@ func main() {
 
 	fmt.Fprintln(os.Stdout, "yaml", yamlOutput)
 
-	// Log the error using different loggers
+	// Wrap and log
 	err = ewrap.Wrap(err, "failed to initialize application",
-		ewrap.WithLogger(logrusAdapter))
-	err.Log()
-
-	err = ewrap.Wrap(err, "application startup failed",
-		ewrap.WithLogger(zerologAdapter))
+		ewrap.WithLogger(logger))
 	err.Log()
 }

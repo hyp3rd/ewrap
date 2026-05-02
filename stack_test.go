@@ -1,11 +1,11 @@
 package ewrap
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,11 +16,13 @@ func TestStackIterator(t *testing.T) {
 
 	// Test HasNext and Next
 	frameCount := 0
+
 	for iterator.HasNext() {
 		frame := iterator.Next()
 		if frame == nil {
 			t.Error("Expected frame, got nil")
 		}
+
 		frameCount++
 	}
 
@@ -35,6 +37,7 @@ func TestStackIterator(t *testing.T) {
 
 	// Test Reset
 	iterator.Reset()
+
 	if !iterator.HasNext() {
 		t.Error("Expected frames after reset")
 	}
@@ -58,12 +61,15 @@ func TestStackFrameStructure(t *testing.T) {
 	if frame.Function == "" {
 		t.Error("Expected function name")
 	}
+
 	if frame.File == "" {
 		t.Error("Expected file name")
 	}
+
 	if frame.Line == 0 {
 		t.Error("Expected line number")
 	}
+
 	if frame.PC == 0 {
 		t.Error("Expected program counter")
 	}
@@ -248,13 +254,14 @@ func TestEmptyErrorGroupSerialization(t *testing.T) {
 
 func BenchmarkErrorGroupSerialization(b *testing.B) {
 	eg := NewErrorGroup()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		eg.Add(New("error").WithMetadata("index", i))
 	}
 
 	b.Run("JSON", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+
+		for range b.N {
 			_, err := eg.ToJSON()
 			if err != nil {
 				b.Fatal(err)
@@ -264,7 +271,8 @@ func BenchmarkErrorGroupSerialization(b *testing.B) {
 
 	b.Run("YAML", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+
+		for range b.N {
 			_, err := eg.ToYAML()
 			if err != nil {
 				b.Fatal(err)

@@ -2,8 +2,10 @@
 Errorf
 goexit
 golangci
+monkeypatch
 myapp
 Println
 retryable
 Retryable
+subpackages
 uintptr

@@ -1,6 +1,6 @@
 include .project-settings.env
 
-GOLANGCI_LINT_VERSION ?= v2.11.4
+GOLANGCI_LINT_VERSION ?= v2.12.1
 GO_VERSION ?= 1.26.2
 GCI_PREFIX ?= github.com/hyp3rd/ewrap
 PROTO_ENABLED ?= true
@@ -99,6 +99,8 @@ sec:
 	@echo "\nRunning gosec..."
 	gosec -exclude-generated ./...
 
+ci: .PHONY
+
 # check_command_exists is a helper function that checks if a command exists.
 define check_command_exists
 @which $(1) > /dev/null 2>&1 || (echo "$(1) command not found" && exit 1)
@@ -125,4 +127,4 @@ help:
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: prepare-toolchain update-toolchain sec vet test benchmark update-deps lint help
+.PHONY: update-deps lint sec test test-race benchmark

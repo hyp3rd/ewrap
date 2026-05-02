@@ -76,8 +76,16 @@ func TestNew(t *testing.T) {
 			t.Error("expected stack trace to be captured")
 		}
 
+		// metadata is initialized lazily on first WithMetadata; nil here is
+		// the expected steady state for an error with no user metadata.
+		if err.metadata != nil {
+			t.Errorf("expected nil metadata before first write, got %v", err.metadata)
+		}
+
+		err.WithMetadata("k", "v")
+
 		if err.metadata == nil {
-			t.Error("expected metadata to be initialized")
+			t.Error("expected metadata to be initialized after WithMetadata")
 		}
 	})
 
@@ -291,9 +299,9 @@ func TestWithRecoverySuggestion(t *testing.T) {
 		t.Error("expected info log when adding recovery suggestion")
 	}
 
-	retrieved, ok := GetMetadataValue[*RecoverySuggestion](err, "recovery_suggestion")
-	if !ok || retrieved.Message != rs.Message {
-		t.Error("expected recovery suggestion metadata to be set")
+	retrieved := err.Recovery()
+	if retrieved == nil || retrieved.Message != rs.Message {
+		t.Error("expected recovery suggestion to be set")
 	}
 
 	err.Log()

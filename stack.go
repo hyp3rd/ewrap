@@ -2,7 +2,6 @@ package ewrap
 
 import (
 	"runtime"
-	"strings"
 )
 
 // StackFrame represents a single frame in a stack trace.
@@ -34,9 +33,7 @@ func NewStackIterator(pcs []uintptr) *StackIterator {
 	for {
 		frame, more := callersFrames.Next()
 
-		// Skip runtime frames and error package frames
-		if !strings.Contains(frame.File, "runtime/") &&
-			!strings.Contains(frame.File, "ewrap/errors.go") {
+		if !isInternalFrame(frame) {
 			frames = append(frames, StackFrame{
 				Function: frame.Function,
 				File:     frame.File,

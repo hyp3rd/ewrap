@@ -1,6 +1,7 @@
 package ewrap
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 
@@ -187,7 +187,9 @@ type ErrorGroupSerialization struct {
 	Errors     []SerializableError `json:"errors"      yaml:"errors"`
 }
 
-// toSerializableError converts an error to a SerializableError.
+// toSerializableError converts an error to a SerializableError. The cause
+// chain is preserved for both *Error and standard wrapped errors via
+// errors.Unwrap so transport consumers do not lose context at boundaries.
 func toSerializableError(err error) SerializableError {
 	if err == nil {
 		return SerializableError{}
@@ -198,13 +200,11 @@ func toSerializableError(err error) SerializableError {
 		Type:    "standard",
 	}
 
-	// Check if it's our custom Error type
 	customErr := &Error{}
 	if errors.As(err, &customErr) {
 		serErr.Type = "ewrap"
 		serErr.StackTrace = customErr.GetStackFrames()
 
-		// Get metadata safely
 		customErr.mu.RLock()
 
 		if len(customErr.metadata) > 0 {
@@ -214,11 +214,18 @@ func toSerializableError(err error) SerializableError {
 
 		customErr.mu.RUnlock()
 
-		// Handle cause
 		if customErr.cause != nil {
 			cause := toSerializableError(customErr.cause)
 			serErr.Cause = &cause
 		}
+
+		return serErr
+	}
+
+	cause := errors.Unwrap(err)
+	if cause != nil {
+		c := toSerializableError(cause)
+		serErr.Cause = &c
 	}
 
 	return serErr

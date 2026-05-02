@@ -94,10 +94,7 @@ func (ec *ErrorContext) String() string {
 func WithContext(ctx context.Context, errorType ErrorType, severity Severity) Option {
 	return func(err *Error) {
 		errorCtx := newErrorContext(ctx, errorType, severity)
-
-		err.mu.Lock()
-		err.metadata["error_context"] = errorCtx
-		err.mu.Unlock()
+		err.errorContext = errorCtx
 
 		if err.logger != nil {
 			err.logger.Debug("error context added",

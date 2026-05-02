@@ -6,6 +6,10 @@ import (
 )
 
 // CircuitBreaker implements the circuit breaker pattern for error handling.
+//
+// Notifications (observer and OnStateChange callback) are fired synchronously
+// after the lock has been released, so callers must not invoke the breaker
+// recursively from a callback.
 type CircuitBreaker struct {
 	name          string
 	maxFailures   int
@@ -14,7 +18,7 @@ type CircuitBreaker struct {
 	lastFailure   time.Time
 	state         CircuitState
 	observer      Observer
-	mu            sync.RWMutex
+	mu            sync.Mutex
 	onStateChange func(name string, from, to CircuitState)
 }
 
@@ -29,6 +33,15 @@ const (
 	// CircuitHalfOpen indicates the circuit is testing recovery.
 	CircuitHalfOpen
 )
+
+// transitionEvent captures a state change so observer/callback dispatch can
+// happen outside the breaker lock.
+type transitionEvent struct {
+	name     string
+	from, to CircuitState
+	observer Observer
+	callback func(string, CircuitState, CircuitState)
+}
 
 // NewCircuitBreaker creates a new circuit breaker.
 func NewCircuitBreaker(name string, maxFailures int, timeout time.Duration) *CircuitBreaker {
@@ -59,79 +72,103 @@ func (cb *CircuitBreaker) OnStateChange(callback func(name string, from, to Circ
 
 // SetObserver sets an observer for the circuit breaker.
 func (cb *CircuitBreaker) SetObserver(observer Observer) {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
 	if observer == nil {
 		observer = newNoopObserver()
 	}
 
+	cb.mu.Lock()
 	cb.observer = observer
+	cb.mu.Unlock()
 }
 
 // RecordFailure records a failure and potentially opens the circuit.
 func (cb *CircuitBreaker) RecordFailure() {
 	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
 	cb.failureCount++
 	cb.lastFailure = time.Now()
 
+	var event *transitionEvent
 	if cb.state == CircuitClosed && cb.failureCount >= cb.maxFailures {
-		cb.transitionTo(CircuitOpen)
+		event = cb.setStateLocked(CircuitOpen)
 	}
+	cb.mu.Unlock()
+
+	cb.fireTransition(event)
 }
 
 // RecordSuccess records a success and potentially closes the circuit.
 func (cb *CircuitBreaker) RecordSuccess() {
 	cb.mu.Lock()
-	defer cb.mu.Unlock()
+
+	var event *transitionEvent
 
 	if cb.state == CircuitHalfOpen {
 		cb.failureCount = 0
-		cb.transitionTo(CircuitClosed)
+		event = cb.setStateLocked(CircuitClosed)
 	}
+	cb.mu.Unlock()
+
+	cb.fireTransition(event)
 }
 
-// CanExecute checks if the operation can be executed.
+// CanExecute checks if the operation can be executed. When the breaker is
+// open and the timeout has elapsed it transitions to half-open atomically.
 func (cb *CircuitBreaker) CanExecute() bool {
-	cb.mu.RLock()
-	defer cb.mu.RUnlock()
+	cb.mu.Lock()
+
+	var (
+		can   bool
+		event *transitionEvent
+	)
 
 	switch cb.state {
 	case CircuitClosed, CircuitHalfOpen:
-		return true
+		can = true
 	case CircuitOpen:
 		if time.Since(cb.lastFailure) > cb.timeout {
-			cb.mu.RUnlock()
-			cb.mu.Lock()
-			cb.transitionTo(CircuitHalfOpen)
-			cb.mu.Unlock()
-			cb.mu.RLock()
-
-			return true
+			event = cb.setStateLocked(CircuitHalfOpen)
+			can = true
 		}
-
-		return false
-	default:
-		return false
 	}
+	cb.mu.Unlock()
+
+	cb.fireTransition(event)
+
+	return can
 }
 
-// transitionTo changes the circuit breaker state.
-func (cb *CircuitBreaker) transitionTo(newState CircuitState) {
+// setStateLocked must be called with cb.mu held. Returns a transitionEvent
+// when the state actually changes; nil otherwise. The caller is responsible
+// for releasing the lock and calling fireTransition.
+func (cb *CircuitBreaker) setStateLocked(newState CircuitState) *transitionEvent {
 	if cb.state == newState {
-		return
+		return nil
 	}
 
 	oldState := cb.state
 	cb.state = newState
 
-	if cb.observer != nil {
-		cb.observer.RecordCircuitStateTransition(cb.name, oldState, newState)
+	return &transitionEvent{
+		name:     cb.name,
+		from:     oldState,
+		to:       newState,
+		observer: cb.observer,
+		callback: cb.onStateChange,
+	}
+}
+
+// fireTransition dispatches observer and callback notifications for a
+// completed transition. Must be called without the lock held.
+func (*CircuitBreaker) fireTransition(event *transitionEvent) {
+	if event == nil {
+		return
 	}
 
-	if cb.onStateChange != nil {
-		go cb.onStateChange(cb.name, oldState, newState)
+	if event.observer != nil {
+		event.observer.RecordCircuitStateTransition(event.name, event.from, event.to)
+	}
+
+	if event.callback != nil {
+		event.callback(event.name, event.from, event.to)
 	}
 }

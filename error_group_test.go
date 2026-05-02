@@ -30,7 +30,7 @@ func TestErrorGroupPool(t *testing.T) {
 				groups[i] = pool.Get()
 
 				// Add errors
-				for j := 0; j < tt.numErrors; j++ {
+				for j := range tt.numErrors {
 					groups[i].Add(fmt.Errorf("error %d", j))
 				}
 			}
@@ -101,7 +101,7 @@ func BenchmarkErrorGroupPool(b *testing.B) {
 	b.Run("WithoutPool", func(b *testing.B) {
 		b.ReportAllocs()
 
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			eg := NewErrorGroup()
 			for _, err := range sampleErrors {
 				eg.Add(err)
