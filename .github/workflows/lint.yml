@@ -5,7 +5,8 @@ on:
   pull_request:
   push:
     branches: [ main ]
-
+permissions:
+  contents: read
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -41,7 +42,6 @@ jobs:
           go install github.com/daixiang0/gci@latest
           go install mvdan.cc/gofumpt@latest
           go install honnef.co/go/tools/cmd/staticcheck@latest
-          # curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" "${{ steps.settings.outputs.golangci_lint_version }}"
       - name: Modules
         run: go mod download
       - name: Tidy check
@@ -60,6 +60,6 @@ jobs:
       - name: staticcheck
         run: staticcheck ./...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v9.2.0
         with:
           version: "${{ steps.settings.outputs.golangci_lint_version }}"

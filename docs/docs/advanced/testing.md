@@ -1,317 +1,248 @@
 # Testing Error Handling
 
-Testing error handling is crucial for building reliable applications. Good error handling tests not only verify that errors are caught and handled correctly but also ensure that error contexts, metadata, and performance characteristics meet your requirements. Let's explore how to effectively test error handling using ewrap.
+Patterns for testing code that produces `*ewrap.Error` values.
 
-## Understanding Error Testing
+## Asserting identity with `errors.Is`
 
-Testing error handling requires a different mindset from testing normal application flow. We need to verify not just that errors are caught, but that they carry the right information, perform efficiently, and integrate properly with the rest of our system. Let's break this down into manageable pieces.
-
-## Unit Testing Error Handling
-
-Let's start with basic unit tests that verify error creation and handling:
+Always test by **identity**, not by string match. ewrap respects the
+stdlib chain via `Unwrap()`, so `errors.Is` works through `Wrap`:
 
 ```go
-func TestErrorCreation(t *testing.T) {
-    // We'll create a structured test to verify different aspects of error creation
-    testCases := []struct {
-        name           string
-        message        string
-        errorType     ErrorType
-        severity      Severity
-        metadata      map[string]any
-        expectedStack bool
-    }{
-        {
-            name:       "Basic Error",
-            message:    "something went wrong",
-            errorType:  ErrorTypeUnknown,
-            severity:   SeverityError,
-            metadata:   nil,
-            expectedStack: true,
-        },
-        {
-            name:       "Database Error with Metadata",
-            message:    "connection failed",
-            errorType:  ErrorTypeDatabase,
-            severity:   SeverityCritical,
-            metadata: map[string]any{
-                "host": "localhost",
-                "port": 5432,
-            },
-            expectedStack: true,
-        },
+sentinel := errors.New("not found")
+
+err := layered() // returns ewrap.Wrap(sentinel, "...")
+
+if !errors.Is(err, sentinel) {
+    t.Fatalf("expected sentinel in chain, got %v", err)
+}
+```
+
+Strings are fragile and break the moment somebody adds a layer.
+
+## Asserting type with `errors.As`
+
+For typed errors:
+
+```go
+var ec *ewrap.Error
+if !errors.As(err, &ec) {
+    t.Fatal("expected an ewrap.Error in the chain")
+}
+
+if ec.GetErrorContext().Type != ewrap.ErrorTypeValidation {
+    t.Errorf("expected validation type, got %v", ec.GetErrorContext().Type)
+}
+```
+
+## Asserting attached state
+
+`HTTPStatus`, `IsRetryable`, and the typed accessors are the right tools
+in tests:
+
+```go
+if got := ewrap.HTTPStatus(err); got != http.StatusBadGateway {
+    t.Errorf("HTTP status: got %d, want %d", got, http.StatusBadGateway)
+}
+
+if !ewrap.IsRetryable(err) {
+    t.Error("expected retryable error")
+}
+
+if rs := ec.Recovery(); rs == nil || rs.Message == "" {
+    t.Error("expected non-empty recovery suggestion")
+}
+```
+
+## Checking metadata
+
+```go
+val, ok := ec.GetMetadata("user_id")
+if !ok || val != "u-1" {
+    t.Errorf("user_id metadata: got %v (ok=%v)", val, ok)
+}
+
+// Or with type checking
+if id, ok := ewrap.GetMetadataValue[string](ec, "user_id"); !ok || id != "u-1" {
+    t.Errorf("user_id: got %q (ok=%v)", id, ok)
+}
+```
+
+## Test loggers
+
+Don't reach for a mocking framework — implement the three-method
+interface inline. The test suite in this repo uses this pattern:
+
+```go
+type recordingLogger struct {
+    mu     sync.Mutex
+    logs   []entry
+    calls  map[string]int
+}
+
+type entry struct {
+    Level string
+    Msg   string
+    Args  []any
+}
+
+func (l *recordingLogger) Error(msg string, kv ...any) {
+    l.mu.Lock()
+    defer l.mu.Unlock()
+    l.logs = append(l.logs, entry{"error", msg, kv})
+    l.calls["error"]++
+}
+// Debug, Info similarly
+
+func TestSomethingLogsErrors(t *testing.T) {
+    l := &recordingLogger{calls: map[string]int{}}
+    err := callee(ewrap.WithLogger(l))
+    err.Log()
+
+    if l.calls["error"] != 1 {
+        t.Errorf("expected 1 error log, got %d", l.calls["error"])
+    }
+}
+```
+
+## Test observers
+
+The breaker subpackage uses an analogous pattern:
+
+```go
+type recordingObserver struct {
+    mu          sync.Mutex
+    transitions []transition
+}
+
+func (o *recordingObserver) RecordTransition(name string, from, to breaker.State) {
+    o.mu.Lock()
+    defer o.mu.Unlock()
+    o.transitions = append(o.transitions, transition{name, from, to})
+}
+```
+
+Same shape works for `ewrap.Observer.RecordError`.
+
+## Concurrency tests
+
+Run race-detected concurrent stress tests on anything that holds shared
+state. ewrap's own suite includes:
+
+```go
+func TestConcurrentMetadata(t *testing.T) {
+    t.Parallel()
+
+    err := ewrap.New("test")
+
+    var wg sync.WaitGroup
+    for i := range 100 {
+        wg.Go(func() { _ = err.WithMetadata(fmt.Sprintf("k%d", i), i) })
+        wg.Go(func() { _, _ = err.GetMetadata(fmt.Sprintf("k%d", i)) })
+    }
+    wg.Wait()
+}
+```
+
+Run with `go test -race ./...` to catch real races.
+
+## Deep-chain tests
+
+Verify your code survives long wrap chains — easy to construct:
+
+```go
+func TestDeepChain(t *testing.T) {
+    var err error = errors.New("root")
+    for i := range 200 {
+        err = ewrap.Wrap(err, fmt.Sprintf("layer-%d", i))
     }
 
-    for _, tc := range testCases {
-        t.Run(tc.name, func(t *testing.T) {
-            // Create the error with test case parameters
-            err := ewrap.New(tc.message,
-                ewrap.WithContext(context.Background(), tc.errorType, tc.severity))
-
-            // Add metadata if provided
-            if tc.metadata != nil {
-                for k, v := range tc.metadata {
-                    err = err.WithMetadata(k, v)
-                }
-            }
-
-            // Verify error properties
-            if err.Error() != tc.message {
-                t.Errorf("Expected message %q, got %q", tc.message, err.Error())
-            }
-
-            // Verify stack trace presence
-            if tc.expectedStack && err.Stack() == "" {
-                t.Error("Expected stack trace, but none was captured")
-            }
-
-            // Verify metadata
-            if tc.metadata != nil {
-                for k, v := range tc.metadata {
-                    if mv, ok := err.GetMetadata(k); !ok || mv != v {
-                        t.Errorf("Metadata %q: expected %v, got %v", k, v, mv)
-                    }
-                }
-            }
-        })
+    if !errors.Is(err, errors.New("root")) {
+        // would fail because errors.New gives unique identity each call
     }
 }
 ```
 
-## Testing Error Wrapping
+(Use a sentinel `var` instead of inline `errors.New` for the assertion.)
 
-Error wrapping requires special attention to ensure context is preserved:
+## Fuzz tests
+
+`(*Error).ToJSON` and `Newf` are good fuzz targets:
 
 ```go
-func TestErrorWrapping(t *testing.T) {
-    // Create a mock logger to verify logging behavior
-    mockLogger := NewMockLogger(t)
-
-    // Create a base error
-    baseErr := errors.New("base error")
-
-    // Create our wrapped error
-    wrappedErr := ewrap.Wrap(baseErr, "operation failed",
-        ewrap.WithLogger(mockLogger),
-        ewrap.WithContext(context.Background(), ErrorTypeDatabase, SeverityCritical))
-
-    // Test error chain
-    t.Run("Error Chain", func(t *testing.T) {
-        // Verify the complete error message
-        expectedMsg := "operation failed: base error"
-        if wrappedErr.Error() != expectedMsg {
-            t.Errorf("Expected message %q, got %q", expectedMsg, wrappedErr.Error())
+func FuzzJSONRoundTrip(f *testing.F) {
+    for _, seed := range []string{"", "boom", strings.Repeat("a", 1024)} {
+        f.Add(seed)
+    }
+    f.Fuzz(func(t *testing.T, msg string) {
+        err := ewrap.New(msg)
+        s, jerr := err.ToJSON()
+        if jerr != nil {
+            t.Fatalf("ToJSON: %v", jerr)
         }
-
-        // Verify we can unwrap to the original error
-        if !errors.Is(wrappedErr, baseErr) {
-            t.Error("Wrapped error should match the original error")
+        var out ewrap.ErrorOutput
+        if err := json.Unmarshal([]byte(s), &out); err != nil {
+            t.Fatalf("invalid JSON: %v", err)
         }
-
-        // Verify the error chain is preserved
-        cause := wrappedErr.Unwrap()
-        if cause != baseErr {
-            t.Error("Unwrapped error should be the base error")
-        }
-    })
-
-    // Test context preservation
-    t.Run("Context Preservation", func(t *testing.T) {
-        ctx := getErrorContext(wrappedErr)
-
-        if ctx.Type != ErrorTypeDatabase {
-            t.Errorf("Expected error type %v, got %v", ErrorTypeDatabase, ctx.Type)
-        }
-
-        if ctx.Severity != SeverityCritical {
-            t.Errorf("Expected severity %v, got %v", SeverityCritical, ctx.Severity)
+        if out.Message != msg {
+            t.Errorf("round-trip lost data: got %q, want %q", out.Message, msg)
         }
     })
 }
 ```
 
-## Testing Error Groups
+## `t.Parallel()` is safe
 
-Error groups require testing both individual operations and concurrent behavior:
+ewrap is goroutine-safe by design — every test in this repo runs with
+`t.Parallel()`. Add it to your tests too unless they mutate global state
+(e.g. `runtime.MemProfileRate`, env vars).
+
+## Testing the breaker
+
+Pin the timeout to something tiny so you don't wait around:
 
 ```go
-func TestErrorGroup(t *testing.T) {
-    // Test pool creation and basic operations
-    t.Run("Basic Operations", func(t *testing.T) {
-        pool := ewrap.NewErrorGroupPool(4)
-        eg := pool.Get()
-        defer eg.Release()
+func TestBreakerOpens(t *testing.T) {
+    t.Parallel()
 
-        // Add some errors
-        eg.Add(ewrap.New("error 1"))
-        eg.Add(ewrap.New("error 2"))
+    cb := breaker.New("test", 1, 10*time.Millisecond)
 
-        // Verify error count
-        if !eg.HasErrors() {
-            t.Error("Expected errors in group")
-        }
+    cb.RecordFailure()
+    if cb.State() != breaker.Open {
+        t.Errorf("State: got %v, want Open", cb.State())
+    }
 
-        // Verify error message format
-        errMsg := eg.Error()
-        if !strings.Contains(errMsg, "error 1") || !strings.Contains(errMsg, "error 2") {
-            t.Error("Error message doesn't contain all errors")
-        }
-    })
+    time.Sleep(15 * time.Millisecond)
 
-    // Test concurrent operations
-    t.Run("Concurrent Operations", func(t *testing.T) {
-        pool := ewrap.NewErrorGroupPool(4)
-        eg := pool.Get()
-        defer eg.Release()
-
-        var wg sync.WaitGroup
-        for i := 0; i < 100; i++ {
-            wg.Add(1)
-            go func(i int) {
-                defer wg.Done()
-                eg.Add(ewrap.New(fmt.Sprintf("concurrent error %d", i)))
-            }(i)
-        }
-
-        wg.Wait()
-
-        // Verify all errors were captured
-        errs := eg.Errors()
-        if len(errs) != 100 {
-            t.Errorf("Expected 100 errors, got %d", len(errs))
-        }
-    })
+    if !cb.CanExecute() {
+        t.Error("expected breaker to allow execution after timeout")
+    }
 }
 ```
 
-## Testing Circuit Breakers
+The transition observer fires synchronously, so you don't need to sleep
+to wait for callbacks.
 
-Circuit breakers require testing state transitions and timing behavior:
+## Test fixtures
 
-```go
-func TestCircuitBreaker(t *testing.T) {
-    t.Run("State Transitions", func(t *testing.T) {
-        cb := ewrap.NewCircuitBreaker("test", 3, time.Second)
-
-        // Should start closed
-        if !cb.CanExecute() {
-            t.Error("Circuit breaker should start in closed state")
-        }
-
-        // Record failures until open
-        for i := 0; i < 3; i++ {
-            cb.RecordFailure()
-        }
-
-        // Should now be open
-        if cb.CanExecute() {
-            t.Error("Circuit breaker should be open after failures")
-        }
-
-        // Wait for timeout
-        time.Sleep(time.Second + 100*time.Millisecond)
-
-        // Should be half-open
-        if !cb.CanExecute() {
-            t.Error("Circuit breaker should be half-open after timeout")
-        }
-
-        // Record success to close
-        cb.RecordSuccess()
-
-        // Should be closed
-        if !cb.CanExecute() {
-            t.Error("Circuit breaker should be closed after success")
-        }
-    })
-}
-```
-
-## Performance Testing
-
-Performance testing is crucial for error handling code:
+For shared sentinels and constants across a test suite, define them in a
+`*_test.go` helper file:
 
 ```go
-func BenchmarkErrorOperations(b *testing.B) {
-    // Benchmark error creation
-    b.Run("Creation", func(b *testing.B) {
-        b.ReportAllocs()
-        for i := 0; i < b.N; i++ {
-            _ = ewrap.New("test error")
-        }
-    })
+// test_helpers_test.go
+package mypkg
 
-    // Benchmark error wrapping
-    b.Run("Wrapping", func(b *testing.B) {
-        baseErr := errors.New("base error")
-        b.ReportAllocs()
-        for i := 0; i < b.N; i++ {
-            _ = ewrap.Wrap(baseErr, "wrapped error")
-        }
-    })
+import "errors"
 
-    // Benchmark error group operations
-    b.Run("ErrorGroup", func(b *testing.B) {
-        pool := ewrap.NewErrorGroupPool(4)
-        b.ReportAllocs()
-        b.RunParallel(func(pb *testing.PB) {
-            for pb.Next() {
-                eg := pool.Get()
-                eg.Add(errors.New("test error"))
-                _ = eg.Error()
-                eg.Release()
-            }
-        })
-    })
-}
+const (
+    msgValidation = "invalid input"
+    msgNotFound   = "user not found"
+)
+
+var (
+    errSentinel = errors.New("sentinel")
+    errOther    = errors.New("other")
+)
 ```
 
-## Integration Testing
-
-Testing error handling in integration scenarios:
-
-```go
-func TestErrorIntegration(t *testing.T) {
-    // Create a test server
-    srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Simulate error handling in an HTTP server
-        err := processRequest(r)
-        if err != nil {
-            // Convert error to API response
-            resp := formatErrorResponse(err)
-            w.WriteHeader(http.StatusInternalServerError)
-            json.NewEncoder(w).Encode(resp)
-            return
-        }
-        w.WriteHeader(http.StatusOK)
-    }))
-    defer srv.Close()
-
-    // Test error handling through the entire stack
-    t.Run("Integration", func(t *testing.T) {
-        resp, err := http.Get(srv.URL)
-        if err != nil {
-            t.Fatal(err)
-        }
-        defer resp.Body.Close()
-
-        // Verify error response format
-        if resp.StatusCode != http.StatusInternalServerError {
-            t.Errorf("Expected status 500, got %d", resp.StatusCode)
-        }
-
-        var errorResp map[string]any
-        if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
-            t.Fatal(err)
-        }
-
-        // Verify error response structure
-        requiredFields := []string{"message", "code", "timestamp"}
-        for _, field := range requiredFields {
-            if _, ok := errorResp[field]; !ok {
-                t.Errorf("Missing required field: %s", field)
-            }
-        }
-    })
-}
-```
+This pattern silences `goconst` and `err113` linters while keeping tests
+readable.

@@ -1,288 +1,185 @@
-# Circuit Breaker Pattern
+# Circuit Breaker (`ewrap/breaker` subpackage)
 
-The Circuit Breaker pattern is like a safety switch in an electrical system - it prevents cascade failures by "breaking the circuit" when too many errors occur. This pattern is crucial for building resilient systems that can gracefully handle failures in distributed environments.
+The classic circuit-breaker pattern, implemented in a small, self-contained
+subpackage. It does **not** depend on the parent `ewrap` module — you can
+use it on its own, and consumers who only want error wrapping don't pay
+for it.
 
-## Understanding Circuit Breakers
+## States
 
-Imagine you're calling a database service. Without a circuit breaker, if the database becomes slow or unresponsive, your application might:
+```text
+┌────────┐  failures ≥ max     ┌──────┐  timeout elapsed   ┌───────────┐
+│ Closed │ ───────────────────►│ Open │ ─────────────────► │ Half-Open │
+└────────┘                     └──────┘                    └─────┬─────┘
+     ▲                                                           │
+     │                       success                             │
+     └───────────────────────────────────────────────────────────┘
+                              failure
+                                ↓
+                              Open
+```
 
-1. Keep trying and failing
-1. Accumulate resource-consuming connections
-1. Eventually crash or become unresponsive itself
+| State | Behaviour |
+| --- | --- |
+| `Closed` | Calls pass through. Failures increment a counter. |
+| `Open` | Calls are rejected fast. After `timeout` elapses, the next `CanExecute` flips state to `HalfOpen`. |
+| `HalfOpen` | A single probe call is allowed. Success closes the breaker; failure re-opens it. |
 
-A circuit breaker prevents this by monitoring failures and automatically stopping attempts when a threshold is reached, giving the system time to recover.
-
-## Basic Circuit Breaker Usage
-
-Let's start with a simple example of how to use circuit breakers in ewrap:
+## Quick start
 
 ```go
-// Create a circuit breaker that will:
-// - Open after 5 failures
-// - Stay open for 1 minute before attempting recovery
-cb := ewrap.NewCircuitBreaker("database-operations", 5, time.Minute)
+import "github.com/hyp3rd/ewrap/breaker"
 
-func queryDatabase() error {
-    // Check if we can execute the operation
-    if !cb.CanExecute() {
-        return ewrap.New("circuit breaker is open",
-            ewrap.WithErrorType(ewrap.ErrorTypeDatabase),
-            ewrap.WithMetadata("breaker_name", "database-operations"))
-    }
+cb := breaker.New("payments", 5, 30*time.Second)
 
-    err := performDatabaseQuery()
-    if err != nil {
-        // Record the failure
-        cb.RecordFailure()
-        return ewrap.Wrap(err, "database query failed")
-    }
+if !cb.CanExecute() {
+    return ewrap.New("payments breaker open",
+        ewrap.WithRetryable(true))
+}
 
-    // Record the success
-    cb.RecordSuccess()
-    return nil
+if err := charge(req); err != nil {
+    cb.RecordFailure()
+    return ewrap.Wrap(err, "charging customer")
+}
+
+cb.RecordSuccess()
+```
+
+## API
+
+```go
+func New(name string, maxFailures int, timeout time.Duration) *Breaker
+func NewWithObserver(name string, maxFailures int, timeout time.Duration, obs Observer) *Breaker
+
+func (cb *Breaker) Name() string
+func (cb *Breaker) State() State
+func (cb *Breaker) CanExecute() bool
+func (cb *Breaker) RecordFailure()
+func (cb *Breaker) RecordSuccess()
+func (cb *Breaker) OnStateChange(callback func(name string, from, to State))
+func (cb *Breaker) SetObserver(obs Observer)
+```
+
+States and the observer interface:
+
+```go
+type State int
+const (
+    Closed State = iota
+    Open
+    HalfOpen
+)
+
+func (s State) String() string // "closed", "open", "half-open", "unknown"
+
+type Observer interface {
+    RecordTransition(name string, from, to State)
 }
 ```
 
-## Circuit Breaker States
+## Observability
 
-A circuit breaker can be in one of three states:
-
-### Closed State (Normal Operation)
+Pass an `Observer` at construction time or with `SetObserver`:
 
 ```go
-if cb.CanExecute() {  // Returns true when circuit is closed
-    // Normal operation - requests are allowed through
-    err := performOperation()
-    if err != nil {
-        cb.RecordFailure()
-    } else {
-        cb.RecordSuccess()
-    }
+type metrics struct {
+    gauge *prometheus.GaugeVec
 }
+
+func (m *metrics) RecordTransition(name string, from, to breaker.State) {
+    m.gauge.WithLabelValues(name, to.String()).Set(1)
+}
+
+cb := breaker.NewWithObserver("payments", 5, 30*time.Second, &metrics{gauge: stateGauge})
 ```
 
-### Open State (Failure Prevention)
+`OnStateChange` registers a callback that fires for the same events as the
+observer:
 
 ```go
-if !cb.CanExecute() {  // Returns false when circuit is open
-    // Circuit is open - fail fast without attempting operation
-    return ewrap.New("service unavailable",
-        ewrap.WithErrorType(ewrap.ErrorTypeInternal),
-        ewrap.WithMetadata("circuit_state", "open"))
-}
+cb.OnStateChange(func(name string, from, to breaker.State) {
+    log.Printf("breaker %s: %s -> %s", name, from, to)
+})
 ```
 
-### Half-Open State (Recovery Attempt)
+### Synchronous, lock-released dispatch
+
+Transition events (observer + callback) fire **synchronously** after the
+breaker lock is released. The relevant guarantees:
+
+1. The breaker is never holding its own mutex when your code runs.
+2. Two transitions cannot interleave — observer/callback for transition A
+   completes before transition B begins.
+3. Your callbacks must **not** invoke the breaker recursively (would
+   deadlock).
+
+There is no fire-and-forget goroutine — earlier versions spawned one per
+transition, which would have allowed unbounded goroutine growth under load.
+
+## Concurrency
+
+`CanExecute`, `RecordFailure`, `RecordSuccess`, `State`, `OnStateChange`,
+and `SetObserver` are all goroutine-safe. The breaker uses a single
+`sync.Mutex` and the `Open → HalfOpen` transition is atomic.
+
+A typical hot-path use:
 
 ```go
-// After timeout period, circuit moves to half-open
-// Allowing a single request through to test the service
-if cb.CanExecute() {
-    err := performOperation()
-    if err != nil {
-        cb.RecordFailure()  // Returns to open state
-        return err
-    }
-    cb.RecordSuccess()  // Returns to closed state
-    return nil
-}
-```
+for range workers {
+    go func() {
+        for req := range jobs {
+            if !cb.CanExecute() {
+                jobs <- req // requeue / drop
+                continue
+            }
 
-## Advanced Circuit Breaker Patterns
+            if err := process(req); err != nil {
+                cb.RecordFailure()
+                continue
+            }
 
-### Monitoring Multiple Services
-
-When your application depends on multiple services, you can use separate circuit breakers for each:
-
-```go
-type ServiceManager struct {
-    dbBreaker    *ewrap.CircuitBreaker
-    cacheBreaker *ewrap.CircuitBreaker
-    apiBreaker   *ewrap.CircuitBreaker
-}
-
-func NewServiceManager() *ServiceManager {
-    return &ServiceManager{
-        dbBreaker:    ewrap.NewCircuitBreaker("database", 5, time.Minute),
-        cacheBreaker: ewrap.NewCircuitBreaker("cache", 3, time.Second*30),
-        apiBreaker:   ewrap.NewCircuitBreaker("external-api", 10, time.Minute*2),
-    }
-}
-
-func (sm *ServiceManager) GetUserData(userID string) (*UserData, error) {
-    // Try cache first
-    if sm.cacheBreaker.CanExecute() {
-        data, err := tryCache(userID)
-        if err == nil {
-            sm.cacheBreaker.RecordSuccess()
-            return data, nil
-        }
-        sm.cacheBreaker.RecordFailure()
-    }
-
-    // Fall back to database
-    if sm.dbBreaker.CanExecute() {
-        data, err := queryDatabase(userID)
-        if err == nil {
-            sm.dbBreaker.RecordSuccess()
-            return data, nil
-        }
-        sm.dbBreaker.RecordFailure()
-    }
-
-    return nil, ewrap.New("all data sources unavailable",
-        ewrap.WithErrorType(ewrap.ErrorTypeInternal),
-        ewrap.WithSeverity(ewrap.SeverityCritical))
-}
-```
-
-### Circuit Breaker with Fallback Strategies
-
-Implement graceful degradation when services fail:
-
-```go
-type CacheService struct {
-    primaryBreaker   *ewrap.CircuitBreaker
-    secondaryBreaker *ewrap.CircuitBreaker
-    localCache       *cache.Cache
-}
-
-func (cs *CacheService) GetValue(key string) (any, error) {
-    // Try primary cache
-    if cs.primaryBreaker.CanExecute() {
-        value, err := cs.getPrimaryCache(key)
-        if err == nil {
-            cs.primaryBreaker.RecordSuccess()
-            return value, nil
-        }
-        cs.primaryBreaker.RecordFailure()
-    }
-
-    // Try secondary cache
-    if cs.secondaryBreaker.CanExecute() {
-        value, err := cs.getSecondaryCache(key)
-        if err == nil {
-            cs.secondaryBreaker.RecordSuccess()
-            return value, nil
-        }
-        cs.secondaryBreaker.RecordFailure()
-    }
-
-    // Fall back to local cache
-    if value, found := cs.localCache.Get(key); found {
-        return value, nil
-    }
-
-    return nil, ewrap.New("all cache layers unavailable",
-        ewrap.WithErrorType(ewrap.ErrorTypeInternal))
-}
-```
-
-## Combining with Error Groups
-
-Circuit Breakers work particularly well with Error Groups for batch operations:
-
-```go
-func processBatch(items []Item) error {
-    pool := ewrap.NewErrorGroupPool(len(items))
-    eg := pool.Get()
-    defer eg.Release()
-
-    cb := ewrap.NewCircuitBreaker("batch-processor", 5, time.Minute)
-
-    for _, item := range items {
-        if !cb.CanExecute() {
-            eg.Add(ewrap.New("circuit breaker open: too many failures"))
-            break
-        }
-
-        if err := processItem(item); err != nil {
-            cb.RecordFailure()
-            eg.Add(ewrap.Wrap(err, fmt.Sprintf("failed to process item %d", item.ID)))
-        } else {
             cb.RecordSuccess()
         }
-    }
-
-    return eg.Error()
+    }()
 }
 ```
 
-## Best Practices
+## Pairing with `ewrap`
 
-### 1. Choose Appropriate Thresholds
-
-Consider your service's characteristics when configuring circuit breakers:
+The breaker has no compile-time dependency on `ewrap`, but the two compose
+naturally — a tripped breaker is the canonical place to return a
+retryable, well-classified error:
 
 ```go
-// For critical, fast operations
-cb := ewrap.NewCircuitBreaker("critical-service", 3, time.Second*30)
-
-// For less critical, slower operations
-cb := ewrap.NewCircuitBreaker("background-service", 10, time.Minute*5)
-```
-
-### 2. Monitor Circuit Breaker States
-
-Implement monitoring to track circuit breaker behavior:
-
-```go
-type MonitoredCircuitBreaker struct {
-    *ewrap.CircuitBreaker
-    metrics *metrics.Recorder
-}
-
-func (mcb *MonitoredCircuitBreaker) RecordFailure() {
-    mcb.CircuitBreaker.RecordFailure()
-    mcb.metrics.Increment("circuit_breaker.failures")
-}
-
-func (mcb *MonitoredCircuitBreaker) RecordSuccess() {
-    mcb.CircuitBreaker.RecordSuccess()
-    mcb.metrics.Increment("circuit_breaker.successes")
+if !cb.CanExecute() {
+    return ewrap.New("payments breaker open",
+        ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityWarning),
+        ewrap.WithHTTPStatus(http.StatusServiceUnavailable),
+        ewrap.WithRetryable(true),
+        ewrap.WithRetry(3, 5*time.Second))
 }
 ```
 
-### 3. Implement Graceful Degradation
+Downstream callers can then use `ewrap.IsRetryable(err)` and
+`ewrap.HTTPStatus(err)` to decide what to do.
 
-Plan for circuit breaker activation:
+## Performance
 
-```go
-func getUserProfile(userID string) (*Profile, error) {
-    if !profileBreaker.CanExecute() {
-        // Return cached or minimal profile when circuit is open
-        return getMinimalProfile(userID)
-    }
+| Benchmark | ns/op | B/op | allocs |
+| --- | ---: | ---: | ---: |
+| `RecordFailure` | ~33 | 0 | 0 |
+| `ConcurrentOperations` (parallel CanExecute / Record) | ~200 | 0 | 0 |
 
-    profile, err := getFullProfile(userID)
-    if err != nil {
-        profileBreaker.RecordFailure()
-        // Fall back to minimal profile
-        return getMinimalProfile(userID)
-    }
+Steady-state operations are allocation-free. Observer / callback dispatch
+allocates only the closure passed to `OnStateChange`.
 
-    profileBreaker.RecordSuccess()
-    return profile, nil
-}
-```
+## When NOT to use a circuit breaker
 
-### 4. Use Context-Aware Circuit Breakers
-
-Consider request context when making circuit breaker decisions:
-
-```go
-func processWithContext(ctx context.Context, data []byte) error {
-    if deadline, ok := ctx.Deadline(); ok {
-        // Adjust circuit breaker timeout based on context deadline
-        timeout := time.Until(deadline)
-        cb := ewrap.NewCircuitBreaker("context-aware", 5, timeout/2)
-
-        if !cb.CanExecute() {
-            return ewrap.New("circuit breaker open",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeTimeout, ewrap.SeverityWarning))
-        }
-        // Process with context-aware circuit breaker
-    }
-    // ... rest of processing
-}
-```
+- **Per-call retries** — use exponential backoff (e.g.
+  `cenkalti/backoff`) instead. The breaker protects shared infrastructure
+  from being overwhelmed; per-call backoff smooths a single client's
+  request.
+- **Validation errors** — those are not transient; failing fast is
+  already the right answer.
+- **Tests** — pin the timeout to something tiny (10 ms) and you won't
+  need to mock the clock.

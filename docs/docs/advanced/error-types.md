@@ -1,254 +1,118 @@
-# Error Types
+# Error Types in Practice
 
-Error types in ewrap provide a structured way to categorize and handle different kinds of errors in your application. Understanding error types helps you make better decisions about error handling, logging, and recovery strategies.
+The [`ErrorType`](../api/error-types.md) enum is small on purpose. This
+page covers how to use the existing values consistently and how to extend
+classification when the built-ins aren't enough.
 
-## Understanding Error Types
+## When to use each built-in
 
-Error types serve multiple purposes:
+| `ErrorType` | Trigger | Maps cleanly to |
+| --- | --- | --- |
+| `Validation` | Caller-supplied input failed checks | HTTP 400/422, gRPC `InvalidArgument` |
+| `NotFound` | Resource lookup returned no rows | HTTP 404, gRPC `NotFound` |
+| `Permission` | AuthN / AuthZ failures | HTTP 401/403, gRPC `PermissionDenied`/`Unauthenticated` |
+| `Database` | Storage layer failure | HTTP 500/503, gRPC `Internal` |
+| `Network` | Connectivity, DNS, TLS handshake | HTTP 502/504, gRPC `Unavailable` |
+| `Configuration` | Misconfiguration at startup or runtime | HTTP 500, gRPC `FailedPrecondition` |
+| `Internal` | Bug or invariant violation | HTTP 500, gRPC `Internal` |
+| `External` | Third-party service rejected the request | HTTP 502/503, gRPC `Unavailable`/`FailedPrecondition` |
+| `Unknown` | Default — avoid in production | HTTP 500 |
 
-1. They help categorize errors meaningfully
-1. They enable consistent error handling across your application
-1. They facilitate automated error processing and reporting
-1. They guide recovery strategies and user feedback
+`Validation` is the only type with bespoke library behaviour: the default
+retry predicate refuses to retry validation errors.
 
-Let's explore the built-in error types and learn how to use them effectively:
+## Pair with `WithHTTPStatus`
+
+`ErrorType` is for classification; `WithHTTPStatus` is for transport.
+Set both — one for routing/branching, one for the wire:
 
 ```go
-type ErrorType int
+ewrap.New("invalid email",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityWarning),
+    ewrap.WithHTTPStatus(http.StatusUnprocessableEntity))
+```
+
+This way, `ec.Type == ErrorTypeValidation` covers internal logic and
+`ewrap.HTTPStatus(err) == 422` covers handler responses, with no risk of
+the two drifting.
+
+## Severity vs HTTP status
+
+`Severity` answers *how loud should we be* — pager versus dashboard
+versus log line. Don't conflate it with HTTP status:
+
+| | Severity | HTTP status |
+| --- | --- | --- |
+| 401 Unauthorized | `Warning` | `401` |
+| 422 Validation | `Warning` | `422` |
+| 500 Internal | `Error` | `500` |
+| 503 Out of capacity | `Critical` | `503` |
+| 503 Breaker open | `Warning` | `503` |
+
+The severity drives alerting; the status drives the response.
+
+## Extending classification
+
+If the built-in types don't fit your domain, two approaches:
+
+### Custom metadata key
+
+```go
+ewrap.New("rate limit exceeded",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityWarning)).
+    WithMetadata("ewrap.subtype", "rate_limit").
+    WithMetadata("retry_after_s", 30)
+```
+
+Read with `ewrap.GetMetadataValue[string](err, "ewrap.subtype")`.
+Cheap, keeps you on the existing enum, surfaces in JSON / slog
+automatically.
+
+### Extra error type in your own package
+
+For a closed domain enum, define your own and use it alongside ewrap's:
+
+```go
+package billing
+
+type Code int
 
 const (
-    ErrorTypeUnknown ErrorType = iota
-    ErrorTypeValidation
-    ErrorTypeNotFound
-    ErrorTypePermission
-    ErrorTypeDatabase
-    ErrorTypeNetwork
-    ErrorTypeConfiguration
-    ErrorTypeInternal
-    ErrorTypeExternal
-)
-```
-
-## Using Error Types
-
-Error types are most powerful when combined with context and metadata. Here's how to use them effectively:
-
-```go
-func validateAndProcessUser(ctx context.Context, user User) error {
-    // Validation errors use ErrorTypeValidation
-    if err := validateUser(user); err != nil {
-        return ewrap.Wrap(err, "user validation failed",
-            ewrap.WithContext(ctx, ErrorTypeValidation, SeverityError)).
-            WithMetadata("validation_fields", getFailedFields(err))
-    }
-
-    // Database errors use ErrorTypeDatabase
-    if err := saveUser(user); err != nil {
-        return ewrap.Wrap(err, "failed to save user",
-            ewrap.WithContext(ctx, ErrorTypeDatabase, SeverityCritical)).
-            WithMetadata("user_id", user.ID)
-    }
-
-    // External service errors use ErrorTypeExternal
-    if err := notifyUserService(user); err != nil {
-        return ewrap.Wrap(err, "failed to notify user service",
-            ewrap.WithContext(ctx, ErrorTypeExternal, SeverityWarning)).
-            WithMetadata("service", "notification")
-    }
-
-    return nil
-}
-```
-
-## Error Type Patterns
-
-Different error types often require different handling strategies. Here's a comprehensive example:
-
-```go
-func handleError(err error) {
-    wrappedErr, ok := err.(*ewrap.Error)
-    if !ok {
-        // Handle plain errors
-        return
-    }
-
-    ctx := getErrorContext(wrappedErr)
-    errorType := ctx.Type
-    severity := ctx.Severity
-
-    switch errorType {
-    case ErrorTypeValidation:
-        // Validation errors often need user feedback
-        handleValidationError(wrappedErr)
-
-    case ErrorTypeDatabase:
-        // Database errors might need retry logic
-        if severity == SeverityCritical {
-            notifyDatabaseAdmin(wrappedErr)
-        }
-        attemptDatabaseRecovery(wrappedErr)
-
-    case ErrorTypeNetwork:
-        // Network errors often benefit from circuit breaking
-        handleNetworkError(wrappedErr)
-
-    case ErrorTypePermission:
-        // Permission errors need security logging
-        logSecurityEvent(wrappedErr)
-
-    default:
-        // Unknown errors need investigation
-        logUnexpectedError(wrappedErr)
-    }
-}
-
-func handleValidationError(err *ewrap.Error) {
-    // Extract validation details for user feedback
-    fields, _ := err.GetMetadata("validation_fields")
-    userMessage := buildUserFriendlyMessage(fields)
-
-    // Log for debugging but don't alert
-    logger.Debug("validation error occurred",
-        "fields", fields,
-        "user_message", userMessage)
-}
-
-func handleDatabaseError(err *ewrap.Error) {
-    // Check if error is retryable
-    if isRetryableError(err) {
-        retryWithBackoff(func() error {
-            // Retry the operation
-            return nil
-        })
-    }
-
-    // Log critical database errors
-    logger.Error("database error occurred",
-        "error", err,
-        "stack", err.Stack())
-}
-```
-
-## Custom Error Types
-
-Sometimes you need domain-specific error types. Here's how to extend the system:
-
-```go
-// Define custom error types
-const (
-    ErrorTypePayment ErrorType = iota + 100  // Start after built-in types
-    ErrorTypeInventory
-    ErrorTypeShipping
+    CodeUnknown Code = iota
+    CodeCardDeclined
+    CodeRateLimited
+    CodeFraudDetected
 )
 
-// Create a type registry
-type ErrorTypeRegistry struct {
-    types map[ErrorType]string
-    mu    sync.RWMutex
-}
-
-func NewErrorTypeRegistry() *ErrorTypeRegistry {
-    return &ErrorTypeRegistry{
-        types: make(map[ErrorType]string),
-    }
-}
-
-func (r *ErrorTypeRegistry) Register(et ErrorType, name string) {
-    r.mu.Lock()
-    defer r.mu.Unlock()
-    r.types[et] = name
-}
-
-func (r *ErrorTypeRegistry) GetName(et ErrorType) string {
-    r.mu.RLock()
-    defer r.mu.RUnlock()
-    if name, ok := r.types[et]; ok {
-        return name
-    }
-    return "unknown"
-}
-
-// Usage example
-func initErrorTypes() *ErrorTypeRegistry {
-    registry := NewErrorTypeRegistry()
-
-    // Register custom error types
-    registry.Register(ErrorTypePayment, "payment")
-    registry.Register(ErrorTypeInventory, "inventory")
-    registry.Register(ErrorTypeShipping, "shipping")
-
-    return registry
+func New(code Code, msg string, opts ...ewrap.Option) *ewrap.Error {
+    return ewrap.NewSkip(1, msg, append(opts,
+        ewrap.WithContext(context.Background(), ewrap.ErrorTypeExternal, ewrap.SeverityWarning),
+    )...).WithMetadata("billing_code", code)
 }
 ```
 
-## Error Type Best Practices
-
-### 1. Consistent Type Assignment
-
-Be consistent in how you assign error types:
+Callers branch on the metadata:
 
 ```go
-// Good - consistent error typing
-func processOrder(order Order) error {
-    if err := validateOrder(order); err != nil {
-        return ewrap.Wrap(err, "order validation failed",
-            ewrap.WithErrorType(ErrorTypeValidation))
+if c, ok := ewrap.GetMetadataValue[billing.Code](err, "billing_code"); ok {
+    switch c {
+    case billing.CodeCardDeclined:
+        // ...
     }
-
-    if err := checkInventory(order); err != nil {
-        return ewrap.Wrap(err, "inventory check failed",
-            ewrap.WithErrorType(ErrorTypeInventory))
-    }
-
-    if err := processPayment(order); err != nil {
-        return ewrap.Wrap(err, "payment processing failed",
-            ewrap.WithErrorType(ErrorTypePayment))
-    }
-
-    return nil
-}
-
-// Avoid - inconsistent or missing error types
-func processOrder(order Order) error {
-    if err := validateOrder(order); err != nil {
-        return fmt.Errorf("validation failed: %w", err)
-    }
-    // ...
 }
 ```
 
-### 2. Error Type Hierarchy
+This keeps ewrap's enum closed (so we don't ship breaking-change new
+values), while letting your domain pile on as much specificity as you
+need.
 
-Consider creating error type hierarchies for complex domains:
+## Avoid the "unknown" default
 
-```go
-// Define error type hierarchy
-type ErrorCategory int
+A value of `ErrorTypeUnknown` (the zero value) usually means somebody
+forgot `WithContext`. Two ways to keep it out of production:
 
-const (
-    CategoryValidation ErrorCategory = iota
-    CategoryInfrastructure
-    CategoryBusiness
-)
-
-type DomainErrorType struct {
-    Type     ErrorType
-    Category ErrorCategory
-    Retryable bool
-}
-
-var errorTypeRegistry = map[ErrorType]DomainErrorType{
-    ErrorTypeValidation: {
-        Category: CategoryValidation,
-        Retryable: false,
-    },
-    ErrorTypeDatabase: {
-        Category: CategoryInfrastructure,
-        Retryable: true,
-    },
-    ErrorTypePayment: {
-        Category: CategoryBusiness,
-        Retryable: true,
-    },
-}
-```
+1. **CI lint:** grep for new `ewrap.New(...)` / `ewrap.Wrap(...)` calls
+   that don't include `WithContext`. Easy to pair with a CODEOWNERS rule.
+2. **Default in handlers:** when serializing to a response, treat
+   `ErrorTypeUnknown` as a 500 with a generic message — never echo back
+   the raw text — and emit a metric so the gap is visible.

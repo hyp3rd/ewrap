@@ -1,236 +1,233 @@
 # Basic Examples
 
-This guide provides practical examples of common error handling scenarios using ewrap. Each example demonstrates a specific feature or pattern, helping you understand how to use the package effectively.
+Drop-in patterns showing the core surface. Each example compiles against
+the current API.
 
-## Simple Error Creation and Handling
-
-Let's start with basic error creation and handling:
+## Simple error
 
 ```go
 package main
 
 import (
-    "context"
     "fmt"
 
     "github.com/hyp3rd/ewrap"
 )
 
 func main() {
-    if err := processUserRegistration("john.doe@example.com"); err != nil {
-        fmt.Printf("Registration failed: %v\n", err)
-        return
-    }
-    fmt.Println("Registration successful")
-}
-
-func processUserRegistration(email string) error {
-    // Create a context for the operation
-    ctx := context.Background()
-
-    // Validate email
-    if err := validateEmail(email); err != nil {
-        return ewrap.Wrap(err, "email validation failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError))
-    }
-
-    // Create user in database
-    if err := createUser(email); err != nil {
-        return ewrap.Wrap(err, "user creation failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
-    }
-
-    return nil
-}
-
-func validateEmail(email string) error {
-    if !strings.Contains(email, "@") {
-        return ewrap.New("invalid email format")
-    }
-    return nil
-}
-
-func createUser(email string) error {
-    // Simulate database operation
-    return nil
+    err := ewrap.New("file not found")
+    fmt.Println(err.Error())          // file not found
+    fmt.Printf("%+v\n", err)          // file not found + stack
 }
 ```
 
-## Error Groups for Multiple Validations
-
-Here's how to collect multiple validation errors:
+## Wrapping with context
 
 ```go
-type User struct {
-    Email     string
-    Password  string
-    Age       int
-    Username  string
-}
+import (
+    "context"
+    "net/http"
 
-func validateUser(ctx context.Context, user User) error {
-    // Get an error group from the pool
-    pool := ewrap.NewErrorGroupPool(4)
+    "github.com/hyp3rd/ewrap"
+)
+
+func loadUser(ctx context.Context, id string) (*User, error) {
+    u, err := db.Get(ctx, id)
+    if err != nil {
+        return nil, ewrap.Wrap(err, "loading user",
+            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError),
+            ewrap.WithHTTPStatus(http.StatusInternalServerError)).
+            WithMetadata("user_id", id)
+    }
+    return u, nil
+}
+```
+
+## `%w` in `Newf`
+
+```go
+import (
+    "errors"
+    "io"
+
+    "github.com/hyp3rd/ewrap"
+)
+
+func read() error {
+    err := ewrap.Newf("reading config: %w", io.EOF)
+
+    fmt.Println(err.Error())              // reading config: EOF
+    fmt.Println(errors.Is(err, io.EOF))   // true
+    return err
+}
+```
+
+## Validation accumulator
+
+```go
+func validate(o Order) error {
+    eg := ewrap.NewErrorGroup()
+
+    if o.Customer == "" {
+        eg.Add(ewrap.New("customer is required",
+            ewrap.WithContext(nil, ewrap.ErrorTypeValidation, ewrap.SeverityError)).
+            WithMetadata("field", "customer"))
+    }
+    if o.Total <= 0 {
+        eg.Add(ewrap.New("total must be positive",
+            ewrap.WithContext(nil, ewrap.ErrorTypeValidation, ewrap.SeverityError)).
+            WithMetadata("field", "total"))
+    }
+
+    return eg.ErrorOrNil()
+}
+```
+
+## Pooled error group
+
+```go
+var pool = ewrap.NewErrorGroupPool(8)
+
+func process(items []Item) error {
     eg := pool.Get()
     defer eg.Release()
 
-    // Validate email
-    if err := validateEmail(user.Email); err != nil {
-        eg.Add(ewrap.Wrap(err, "invalid email",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)))
+    for _, it := range items {
+        eg.Add(handle(it))
     }
-
-    // Validate password
-    if len(user.Password) < 8 {
-        eg.Add(ewrap.New("password too short",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)).
-            WithMetadata("min_length", 8))
-    }
-
-    // Validate age
-    if user.Age < 18 {
-        eg.Add(ewrap.New("user must be 18 or older",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)).
-            WithMetadata("provided_age", user.Age))
-    }
-
-    return eg.Error()
+    return eg.Join()
 }
 ```
 
-## Logging Integration
-
-Example showing basic logging integration:
+## Inspecting metadata
 
 ```go
-type AppLogger struct {
-    logger *zap.Logger
+err := ewrap.New("payment failed").
+    WithMetadata("provider", "stripe").
+    WithMetadata("attempt", 2)
+
+if v, ok := err.GetMetadata("provider"); ok {
+    fmt.Println(v) // stripe
 }
 
-func (l *AppLogger) Error(msg string, keysAndValues ...any) {
-    l.logger.Error(msg, convertToZapFields(keysAndValues...)...)
-}
-
-func (l *AppLogger) Debug(msg string, keysAndValues ...any) {
-    l.logger.Debug(msg, convertToZapFields(keysAndValues...)...)
-}
-
-func (l *AppLogger) Info(msg string, keysAndValues ...any) {
-    l.logger.Info(msg, convertToZapFields(keysAndValues...)...)
-}
-
-func processWithLogging(ctx context.Context, data []byte) error {
-    logger := &AppLogger{logger: zapLogger}
-
-    err := processData(data)
-    if err != nil {
-        return ewrap.Wrap(err, "data processing failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError),
-            ewrap.WithLogger(logger))
-    }
-
-    return nil
+if attempt, ok := ewrap.GetMetadataValue[int](err, "attempt"); ok {
+    fmt.Println(attempt) // 2
 }
 ```
 
-## HTTP Handler Example
-
-Using ewrap in an HTTP handler:
+## Walking the cause chain
 
 ```go
-func handleUserRegistration(w http.ResponseWriter, r *http.Request) {
-    // Create request context with ID
-    ctx := r.Context()
-    requestID := generateRequestID()
-    ctx = context.WithValue(ctx, "request_id", requestID)
+import "errors"
 
-    var user User
-    if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-        respondWithError(w, ewrap.Wrap(err, "invalid request body",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)))
-        return
-    }
+err := ewrap.Wrap(io.EOF, "reading body")
 
-    if err := validateUser(ctx, user); err != nil {
-        respondWithError(w, err)
-        return
-    }
+errors.Is(err, io.EOF)     // true
+errors.Unwrap(err)         // io.EOF
+err.Cause()                // io.EOF
+```
 
-    if err := createUser(ctx, user); err != nil {
-        respondWithError(w, err)
-        return
-    }
+## Logging with `slog` directly
 
-    respondWithJSON(w, http.StatusCreated, map[string]string{
-        "message": "user created successfully",
-    })
+`*Error` implements `slog.LogValuer`, so you can pass it as a structured
+field with no adapter:
+
+```go
+import (
+    "log/slog"
+    "os"
+)
+
+logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+err := ewrap.New("payment failed",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError))
+
+logger.Error("payment failed", "err", err)
+// {"level":"ERROR","msg":"payment failed","err":{"message":"payment failed",
+//  "type":"external","severity":"error",...}}
+```
+
+## Logging via `(*Error).Log`
+
+For loggers attached as `ewrap.Logger`:
+
+```go
+import ewrapslog "github.com/hyp3rd/ewrap/slog"
+
+logger := ewrapslog.New(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+err := ewrap.New("payment failed",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeExternal, ewrap.SeverityError),
+    ewrap.WithLogger(logger))
+err.Log()
+```
+
+## Pretty-printing for humans
+
+```go
+fmt.Printf("%+v\n", err)
+// payment failed
+// /path/to/repo/billing.go:42 - example.com/repo/billing.charge
+// /path/to/repo/handlers.go:71 - example.com/repo/handlers.Pay
+// ...
+```
+
+## Circuit breaker basics
+
+```go
+import "github.com/hyp3rd/ewrap/breaker"
+
+cb := breaker.New("payments", 3, time.Minute)
+
+if !cb.CanExecute() {
+    return ewrap.New("payments breaker open",
+        ewrap.WithRetryable(true))
 }
 
-func respondWithError(w http.ResponseWriter, err error) {
-    if wrappedErr, ok := err.(*ewrap.Error); ok {
-        // Convert error to API response
-        response := ErrorResponse{
-            Message: wrappedErr.Error(),
-            Code:    getErrorCode(wrappedErr),
-            Details: getErrorDetails(wrappedErr),
+if err := charge(); err != nil {
+    cb.RecordFailure()
+    return ewrap.Wrap(err, "charging customer")
+}
+
+cb.RecordSuccess()
+```
+
+## Classifying for the wire
+
+```go
+func toResponse(w http.ResponseWriter, err error) {
+    status := ewrap.HTTPStatus(err)
+    if status == 0 {
+        status = http.StatusInternalServerError
+    }
+
+    msg := err.Error()
+    if e, ok := err.(*ewrap.Error); ok {
+        msg = e.SafeError() // PII-redacted variant
+    }
+
+    http.Error(w, msg, status)
+}
+```
+
+## Retry with classification
+
+```go
+func withRetry(ctx context.Context, op func() error) error {
+    for attempt := 1; attempt <= 5; attempt++ {
+        err := op()
+        if err == nil {
+            return nil
         }
-
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(getHTTPStatus(wrappedErr))
-        json.NewEncoder(w).Encode(response)
-    } else {
-        // Handle unwrapped errors
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]string{
-            "message": "internal server error",
-        })
-    }
-}
-```
-
-## Database Operations
-
-Example showing database error handling:
-
-```go
-func getUserByID(ctx context.Context, userID string) (*User, error) {
-    var user User
-    err := db.QueryRow("SELECT * FROM users WHERE id = $1", userID).Scan(&user)
-
-    switch {
-    case err == sql.ErrNoRows:
-        return nil, ewrap.New("user not found",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeNotFound, ewrap.SeverityWarning)).
-            WithMetadata("user_id", userID)
-    case err != nil:
-        return nil, ewrap.Wrap(err, "database query failed",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError)).
-            WithMetadata("user_id", userID)
-    }
-
-    return &user, nil
-}
-```
-
-## Cleanup and Deferred Operations
-
-Example showing error handling with cleanup:
-
-```go
-func processFile(ctx context.Context, path string) error {
-    file, err := os.Open(path)
-    if err != nil {
-        return ewrap.Wrap(err, "failed to open file",
-            ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError))
-    }
-    defer func() {
-        if closeErr := file.Close(); closeErr != nil {
-            err = ewrap.Wrap(closeErr, "failed to close file",
-                ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityWarning))
+        if !ewrap.IsRetryable(err) {
+            return err
         }
-    }()
-
-    // Process file...
-    return nil
+        select {
+        case <-time.After(backoff(attempt)):
+        case <-ctx.Done():
+            return ewrap.Wrap(ctx.Err(), "retry budget exhausted")
+        }
+    }
+    return op()
 }
 ```

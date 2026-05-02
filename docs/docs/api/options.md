@@ -1,219 +1,183 @@
 # Options
 
-Options in ewrap provide a flexible way to configure error behavior. Using the functional options pattern, you can customize how errors are created, logged, and handled while maintaining clean and extensible code.
+`type Option func(*Error)` — variadic configuration for `New` and
+`Wrap`. Options run during construction; after `New`/`Wrap` returns the
+`*Error` is effectively immutable except for chained `WithMetadata` /
+`WithContext` calls and `IncrementRetry`.
 
-## Understanding Options
+This page is the canonical reference for every option exported from the
+root package.
 
-Options are functions that modify error behavior. They follow Go's functional options pattern, which allows for flexible and readable configuration. Each option function takes an error pointer and modifies its properties:
+## `WithLogger(log Logger) Option`
+
+Attach a `Logger` consulted by `(*Error).Log`. Inherited by `Wrap` when
+the inner error is a `*Error`.
 
 ```go
-type Option func(*Error)
+err := ewrap.New("boom", ewrap.WithLogger(logger))
+err.Log() // calls logger.Error("error occurred", ...kv)
 ```
 
-## Built-in Options
+Setting `WithLogger(nil)` is allowed and silently no-ops the logger
+(typical pattern: pass nil in unit tests).
 
-### WithContext
+## `WithObserver(obs Observer) Option`
 
-The `WithContext` option enriches errors with contextual information, including error type, severity, and relevant request data:
+Attach an `Observer` whose `RecordError(msg string)` is called from
+`(*Error).Log`. Inherited by `Wrap` when the inner error is a `*Error`.
 
 ```go
-func processUser(ctx context.Context, userID string) error {
-    err := ewrap.New("user processing failed",
-        ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError))
-
-    // The error now includes:
-    // - Error type and severity
-    // - Stack trace location
-    // - Request ID (if present in context)
-    // - User information (if present in context)
-    // - Operation name (if present in context)
-    // - Component name (if present in context)
-    // - Environment information
-    return err
-}
+err := ewrap.New("boom", ewrap.WithObserver(metrics))
+err.Log() // metrics.RecordError("boom")
 ```
 
-The context option automatically extracts common values from the provided context:
+## `WithStackDepth(depth int) Option`
 
-- `request_id` for request tracing
-- `user` for user identification
-- `operation` for operation naming
-- `component` for system component identification
-
-### WithLogger
-
-The `WithLogger` option attaches a logger to the error, enabling automatic logging of error events:
+Override the default stack capture depth (32). Pass `0` to disable
+capture entirely.
 
 ```go
-// Create a logger (implementing the Logger interface)
-logger := NewZapLogger()
-
-// Attach logger to error
-err := ewrap.New("database connection failed",
-    ewrap.WithLogger(logger),
-    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
-
-// The error will automatically log:
-// - Error creation
-// - Context addition
-// - Metadata changes
-// - Stack trace information
+ewrap.New("boom", ewrap.WithStackDepth(8))   // shallower
+ewrap.New("boom", ewrap.WithStackDepth(0))   // no stack
+ewrap.New("boom", ewrap.WithStackDepth(128)) // deeper
 ```
 
-### WithRetry
+## `WithContext(ctx context.Context, type ErrorType, sev Severity) Option`
 
-The `WithRetry` option configures retry behavior for recoverable errors:
+Build an `ErrorContext` from the supplied `context.Context` and attach
+it. The option reads `request_id`, `user`, `operation`, and `component`
+keys out of `ctx` if present. The resulting `ErrorContext` includes the
+file/line of the calling `New`/`Wrap` (via `runtime.Caller`).
 
 ```go
-err := ewrap.New("temporary network failure",
-    ewrap.WithContext(ctx, ewrap.ErrorTypeNetwork, ewrap.SeverityError),
-    ewrap.WithRetry(3, time.Second*5))
-
-// The error now includes retry information:
-// - Maximum retry attempts (3)
-// - Delay between attempts (5 seconds)
-// - Retry strategy configuration
+err := ewrap.New("boom",
+    ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityError))
 ```
 
-## Combining Options
-
-Options can be combined to create rich error configurations:
+For attaching a pre-built `ErrorContext`, use the method form:
 
 ```go
-func processOrder(ctx context.Context, orderID string) error {
-    // Create an error with multiple options
-    return ewrap.New("order processing failed",
-        // Add context information
-        ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError),
-        // Attach logger
-        ewrap.WithLogger(logger),
-        // Configure retry behavior
-        ewrap.WithRetry(3, time.Second*5))
-}
+err.WithContext(&ewrap.ErrorContext{Type: ewrap.ErrorTypeNetwork})
 ```
 
-## Creating Custom Options
+## `WithRecoverySuggestion(rs *RecoverySuggestion) Option`
 
-You can create custom options to extend error functionality:
+Attach actionable recovery guidance. Read back via `(*Error).Recovery()`,
+emitted as `recovery_message`, `recovery_actions`, and
+`recovery_documentation` fields by `Log`.
 
 ```go
-// WithCorrelationID adds a correlation ID to the error
-func WithCorrelationID(correlationID string) ewrap.Option {
-    return func(err *ewrap.Error) {
-        err.WithMetadata("correlation_id", correlationID)
+ewrap.New("DB unreachable",
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message:       "Verify pool sizing and credentials.",
+        Actions:       []string{"reset pool", "rotate creds"},
+        Documentation: "https://runbooks.example.com/db",
+    }))
+```
+
+## `WithRetry(maxAttempts int, delay time.Duration, opts ...RetryOption) Option`
+
+Attach a retry **policy** (max attempts, delay, predicate). Use with
+`(*Error).CanRetry()` and `(*Error).IncrementRetry()` to drive a retry
+loop, or just inspect `(*Error).Retry()` for the raw `*RetryInfo`.
+
+```go
+err := ewrap.New("upstream timeout", ewrap.WithRetry(3, 5*time.Second))
+
+for err.CanRetry() {
+    if doErr := upstream(); doErr == nil {
+        break
     }
+    err.IncrementRetry()
+    time.Sleep(err.Retry().Delay)
 }
-
-// WithResource adds resource information to the error
-func WithResource(resourceType, resourceID string) ewrap.Option {
-    return func(err *ewrap.Error) {
-        err.WithMetadata("resource_type", resourceType)
-        err.WithMetadata("resource_id", resourceID)
-    }
-}
-
-// Usage example
-err := ewrap.New("resource access failed",
-    ewrap.WithContext(ctx, ewrap.ErrorTypePermission, ewrap.SeverityError),
-    WithCorrelationID("corr-123"),
-    WithResource("document", "doc-456"))
 ```
 
-## Best Practices
+### `WithRetryShould(fn func(error) bool) RetryOption`
 
-### Option Organization
-
-Group related options together for better readability:
+Customise the predicate consulted by `CanRetry`:
 
 ```go
-// Configuration options
-configOpts := []ewrap.Option{
-    ewrap.WithContext(ctx, errorType, severity),
-    ewrap.WithLogger(logger),
-}
-
-// Retry options
-retryOpts := []ewrap.Option{
-    ewrap.WithRetry(maxAttempts, delay),
-}
-
-// Combine all options
-allOpts := append(configOpts, retryOpts...)
-
-// Create error with combined options
-err := ewrap.New("operation failed", allOpts...)
+ewrap.WithRetry(5, 2*time.Second,
+    ewrap.WithRetryShould(func(e error) bool { return ewrap.IsRetryable(e) }))
 ```
 
-### Option Factories
+The default predicate returns `true` unless `ErrorContext.Type` is
+`ErrorTypeValidation`.
 
-Create factory functions for commonly used option combinations:
+## `WithHTTPStatus(status int) Option`
+
+Tag the error with an HTTP status code. Use `net/http` constants for
+clarity. `ewrap.HTTPStatus(err)` walks the chain and returns the first
+non-zero status.
 
 ```go
-// CreateHTTPErrorOptions creates standard options for HTTP handlers
-func CreateHTTPErrorOptions(ctx context.Context, logger Logger) []ewrap.Option {
-    return []ewrap.Option{
-        ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError),
-        ewrap.WithLogger(logger),
-        WithCorrelationID(GetRequestID(ctx)),
-    }
-}
-
-// Usage in HTTP handlers
-func handleRequest(w http.ResponseWriter, r *http.Request) {
-    opts := CreateHTTPErrorOptions(r.Context(), logger)
-
-    if err := processRequest(r); err != nil {
-        err = ewrap.Wrap(err, "request processing failed", opts...)
-        handleError(w, err)
-        return
-    }
-}
+ewrap.New("upstream 502",
+    ewrap.WithHTTPStatus(http.StatusBadGateway))
 ```
 
-### Option Validation
+## `WithRetryable(retryable bool) Option`
 
-When creating custom options, include validation logic:
+Three-state retry classification (unset / true / false). Read with
+`(*Error).Retryable() (value, set bool)` or `ewrap.IsRetryable(err)`.
 
 ```go
-// WithTimeout adds a timeout duration to the error
-func WithTimeout(duration time.Duration) ewrap.Option {
-    return func(err *ewrap.Error) {
-        // Validate input
-        if duration <= 0 {
-            duration = time.Second * 30 // Default timeout
-        }
-
-        err.WithMetadata("timeout", duration.String())
-        err.WithMetadata("deadline", time.Now().Add(duration))
-    }
-}
+ewrap.New("rate limited", ewrap.WithRetryable(true))
+ewrap.New("invalid credentials", ewrap.WithRetryable(false))
 ```
 
-### Dynamic Options
+`IsRetryable` falls through to the stdlib `interface{ Temporary() bool }`
+when no ewrap layer set the flag, so `net.OpError` and similar work
+out of the box.
 
-Create options that adapt based on conditions:
+## `WithSafeMessage(safe string) Option`
+
+Attach a redacted variant returned by `(*Error).SafeError()`. Each layer
+contributes either its safe message (if set) or its raw `msg`; standard
+wrapped errors without a `SafeError` method are included verbatim.
 
 ```go
-// WithEnvironmentAwareLogging adjusts logging based on environment
-func WithEnvironmentAwareLogging(logger Logger) ewrap.Option {
-    return func(err *ewrap.Error) {
-        env := os.Getenv("APP_ENV")
-
-        switch env {
-        case "production":
-            // Use production logger settings
-            err.WithMetadata("log_level", "error")
-            err.WithMetadata("include_stack", true)
-        case "development":
-            // Use development logger settings
-            err.WithMetadata("log_level", "debug")
-            err.WithMetadata("include_stack", true)
-        default:
-            // Use default settings
-            err.WithMetadata("log_level", "info")
-        }
-
-        err.SetLogger(logger)
-    }
-}
+ewrap.New("user 'alice@example.com' rejected",
+    ewrap.WithSafeMessage("user [redacted] rejected"))
 ```
+
+## Inheritance through `Wrap`
+
+When the inner error is a `*Error`, `Wrap` inherits **all** option-set
+state on the inner: logger, observer, stack-depth-derived stack, error
+context, recovery suggestion, retry info, HTTP status, retryable flag,
+and a clone of the metadata map.
+
+Any option passed to `Wrap` overrides the inherited value:
+
+```go
+inner := ewrap.New("boom", ewrap.WithHTTPStatus(http.StatusBadGateway))
+outer := ewrap.Wrap(inner, "in handler",
+    ewrap.WithHTTPStatus(http.StatusInternalServerError))
+
+ewrap.HTTPStatus(outer) // 500 — outer wins
+ewrap.HTTPStatus(inner) // 502 — inner unchanged
+```
+
+## RetryOption
+
+A separate option type for `WithRetry`'s sub-options:
+
+```go
+type RetryOption func(*RetryInfo)
+
+func WithRetryShould(fn func(error) bool) RetryOption
+```
+
+## FormatOption
+
+`(*Error).ToJSON` and `(*Error).ToYAML` accept their own option type:
+
+```go
+type FormatOption func(*ErrorOutput)
+
+func WithTimestampFormat(format string) FormatOption
+func WithStackTrace(include bool) FormatOption
+```
+
+See [Serialization](../features/serialization.md).

@@ -1,14 +1,12 @@
 # Logging Integration
 
-When errors occur in your application, having detailed, structured logs is crucial for understanding what went wrong and why. The ewrap package provides a flexible logging system that integrates seamlessly with popular logging frameworks while maintaining a clean, consistent interface for error logging.
+ewrap defines a tiny three-method `Logger` interface and ships a single
+adapter (for stdlib `log/slog`) in a sibling subpackage. Adapters for
+zap, zerolog, logrus, glog, etc. are intentionally **not** bundled: the
+interface is so small that a working adapter is well under ten lines of
+your own code.
 
-## Understanding Logging in ewrap
-
-The logging system in ewrap is built around a simple yet powerful interface that can adapt to any logging framework. When an error occurs, ewrap can automatically log not just the error message, but also the stack trace, metadata, and contextual information that helps tell the complete story of what happened.
-
-## The Logger Interface
-
-Let's start by understanding the core logging interface:
+## The interface
 
 ```go
 type Logger interface {
@@ -18,306 +16,155 @@ type Logger interface {
 }
 ```
 
-This interface is intentionally simple to make it easy to adapt any logging framework to work with ewrap. The variadic `keysAndValues` parameter allows for structured logging where key-value pairs provide additional context.
+`keysAndValues` is the standard structured-logging convention: alternating
+key/value pairs after the message. Implementations must be goroutine-safe
+because `(*Error).Log` calls them synchronously from the calling
+goroutine.
 
-## Built-in Logging Adapters
-
-ewrap provides adapters for popular logging frameworks. Here's how to use them:
-
-### Zap Logger Integration
-
-```go
-import (
-    "go.uber.org/zap"
-    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
-)
-
-func setupZapLogger() error {
-    // Create a production-ready Zap logger
-    zapLogger, err := zap.NewProduction()
-    if err != nil {
-        return err
-    }
-
-    // Create the adapter
-    logger := adapters.NewZapAdapter(zapLogger)
-
-    // Create an error with logging enabled
-    err = ewrap.New("operation failed",
-        ewrap.WithLogger(logger),
-        ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError)).
-        WithMetadata("operation", "user_update").
-        WithMetadata("user_id", userID)
-
-    // The error will be automatically logged with all context
-    return err
-}
-```
-
-### Logrus Integration
+## Attaching a logger
 
 ```go
-import (
-    "github.com/sirupsen/logrus"
-    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
-)
-
-func setupLogrusLogger() error {
-    // Configure Logrus
-    logrusLogger := logrus.New()
-    logrusLogger.SetFormatter(&logrus.JSONFormatter{})
-
-    // Create the adapter
-    logger := adapters.NewLogrusAdapter(logrusLogger)
-
-    // Use the logger with ewrap
-    return ewrap.New("database connection failed",
-        ewrap.WithLogger(logger),
-        ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
-}
+err := ewrap.New("payment failed", ewrap.WithLogger(logger))
+err.Log() // emits an "error occurred" record with all attached fields
 ```
 
-### Zerolog Integration
+`(*Error).Log` emits a single record containing:
 
-```go
-import (
-    "github.com/rs/zerolog"
-    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
-)
+- `error` — the message
+- `cause` — `e.cause.Error()` if the chain has one
+- `stack` — formatted stack trace
+- every key/value from the metadata map
+- `recovery_message`, `recovery_actions`, `recovery_documentation` if
+  `WithRecoverySuggestion` was used
 
-func setupZerolog() error {
-    // Configure Zerolog
-    zerologLogger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+The logger reference is also inherited by `Wrap` when the inner error is
+already a `*Error`, so a single `WithLogger` near the root propagates out.
 
-    // Create the adapter
-    logger := adapters.NewZerologAdapter(zerologLogger)
+## Slog adapter
 
-    // Use with ewrap
-    return ewrap.New("request validation failed",
-        ewrap.WithLogger(logger),
-        ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityWarning))
-}
-```
-
-### Slog Integration (Go 1.21+)
+Stdlib `log/slog` is the recommended target for new projects. The adapter
+is in [`ewrap/slog`](slog-adapter.md):
 
 ```go
 import (
     "log/slog"
     "os"
-    "github.com/hyp3rd/ewrap/pkg/logger/adapters"
+
+    "github.com/hyp3rd/ewrap"
+    ewrapslog "github.com/hyp3rd/ewrap/slog"
 )
 
-func setupSlogLogger() error {
-    slogLogger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-    logger := adapters.NewSlogAdapter(slogLogger)
+handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
+logger := ewrapslog.New(slog.New(handler))
 
-    return ewrap.New("operation failed",
-        ewrap.WithLogger(logger))
-}
+err := ewrap.New("payment failed", ewrap.WithLogger(logger))
+err.Log()
 ```
 
-## Advanced Logging Patterns
-
-### Contextual Logging
-
-Here's how to create rich, contextual logs that capture the full story of an error:
+If you'd rather log the error directly via `slog`, you don't need an
+adapter at all — `*Error` implements `slog.LogValuer`:
 
 ```go
-func processOrder(ctx context.Context, order Order) error {
-    logger := getContextLogger(ctx)
-
-    // Create an operation logger that will track the entire process
-    opLogger := &OperationLogger{
-        Logger:    logger,
-        Operation: "process_order",
-        StartTime: time.Now(),
-        Context:   map[string]any{
-            "order_id": order.ID,
-            "user_id":  order.UserID,
-        },
-    }
-
-    // Log operation start
-    opLogger.Info("starting order processing")
-
-    if err := validateOrder(order); err != nil {
-        return ewrap.Wrap(err, "order validation failed",
-            ewrap.WithLogger(opLogger),
-            ewrap.WithContext(ctx, ewrap.ErrorTypeValidation, ewrap.SeverityError)).
-            WithMetadata("validation_time", time.Since(opLogger.StartTime))
-    }
-
-    if err := processPayment(order); err != nil {
-        return ewrap.Wrap(err, "payment processing failed",
-            ewrap.WithLogger(opLogger),
-            ewrap.WithContext(ctx, ewrap.ErrorTypePayment, ewrap.SeverityCritical)).
-            WithMetadata("processing_time", time.Since(opLogger.StartTime))
-    }
-
-    // Log successful completion
-    opLogger.Info("order processed successfully",
-        "duration", time.Since(opLogger.StartTime))
-
-    return nil
-}
+slog.Error("payment failed", "err", err)
+// emits structured fields: message, type, severity, request_id, cause,
+// metadata, recovery — all without the adapter
 ```
 
-### Creating a Custom Logger
+See [fmt.Formatter & slog](format-and-slog.md) for the `LogValuer` details.
 
-You might want to create a custom logger that adds specific functionality:
+## Writing an adapter for another logger
+
+The whole adapter is three methods. Here's zap:
 
 ```go
-type CustomLogger struct {
-    logger    Logger
-    component string
-    env       string
-}
+import "go.uber.org/zap"
 
-func NewCustomLogger(baseLogger Logger, component string) *CustomLogger {
-    return &CustomLogger{
-        logger:    baseLogger,
-        component: component,
-        env:       os.Getenv("APP_ENV"),
-    }
-}
+type ZapAdapter struct{ l *zap.SugaredLogger }
 
-func (l *CustomLogger) Error(msg string, keysAndValues ...any) {
-    // Add standard context to all error logs
-    enrichedKV := append([]any{
-        "component", l.component,
-        "environment", l.env,
-        "timestamp", time.Now().UTC(),
-    }, keysAndValues...)
-
-    l.logger.Error(msg, enrichedKV...)
-}
-
-func (l *CustomLogger) Debug(msg string, keysAndValues ...any) {
-    enrichedKV := append([]any{
-        "component", l.component,
-        "environment", l.env,
-    }, keysAndValues...)
-
-    l.logger.Debug(msg, enrichedKV...)
-}
-
-func (l *CustomLogger) Info(msg string, keysAndValues ...any) {
-    enrichedKV := append([]any{
-        "component", l.component,
-        "environment", l.env,
-    }, keysAndValues...)
-
-    l.logger.Info(msg, enrichedKV...)
-}
+func NewZap(l *zap.Logger) *ZapAdapter         { return &ZapAdapter{l: l.Sugar()} }
+func (a *ZapAdapter) Error(msg string, kv ...any) { a.l.Errorw(msg, kv...) }
+func (a *ZapAdapter) Debug(msg string, kv ...any) { a.l.Debugw(msg, kv...) }
+func (a *ZapAdapter) Info(msg string, kv ...any)  { a.l.Infow(msg, kv...) }
 ```
 
-### Logging with Circuit Breakers
-
-Combining logging with circuit breakers provides insight into system health:
+logrus:
 
 ```go
-type MonitoredCircuitBreaker struct {
-    *ewrap.CircuitBreaker
-    logger Logger
-    name   string
-}
+import "github.com/sirupsen/logrus"
 
-func NewMonitoredCircuitBreaker(name string, maxFailures int, timeout time.Duration, logger Logger) *MonitoredCircuitBreaker {
-    cb := ewrap.NewCircuitBreaker(name, maxFailures, timeout)
-    return &MonitoredCircuitBreaker{
-        CircuitBreaker: cb,
-        logger:        logger,
-        name:         name,
+type LogrusAdapter struct{ l *logrus.Logger }
+
+func NewLogrus(l *logrus.Logger) *LogrusAdapter { return &LogrusAdapter{l: l} }
+
+func (a *LogrusAdapter) emit(level logrus.Level, msg string, kv []any) {
+    fields := logrus.Fields{}
+    for i := 0; i+1 < len(kv); i += 2 {
+        if k, ok := kv[i].(string); ok {
+            fields[k] = kv[i+1]
+        }
     }
+    a.l.WithFields(fields).Log(level, msg)
 }
 
-func (m *MonitoredCircuitBreaker) RecordFailure() {
-    m.CircuitBreaker.RecordFailure()
-    m.logger.Error("circuit breaker failure recorded",
-        "breaker_name", m.name,
-        "current_state", "open",
-        "timestamp", time.Now())
-}
-
-func (m *MonitoredCircuitBreaker) RecordSuccess() {
-    m.CircuitBreaker.RecordSuccess()
-    m.logger.Info("circuit breaker success recorded",
-        "breaker_name", m.name,
-        "current_state", "closed",
-        "timestamp", time.Now())
-}
+func (a *LogrusAdapter) Error(msg string, kv ...any) { a.emit(logrus.ErrorLevel, msg, kv) }
+func (a *LogrusAdapter) Debug(msg string, kv ...any) { a.emit(logrus.DebugLevel, msg, kv) }
+func (a *LogrusAdapter) Info(msg string, kv ...any)  { a.emit(logrus.InfoLevel, msg, kv) }
 ```
 
-## Best Practices
-
-### 1. Structured Logging
-
-Always use structured logging for better searchability:
+zerolog:
 
 ```go
-// Good - structured logging
-logger.Error("database query failed",
-    "query", queryString,
-    "duration_ms", duration.Milliseconds(),
-    "affected_rows", 0)
+import "github.com/rs/zerolog"
 
-// Avoid - unstructured logging
-logger.Error(fmt.Sprintf("database query failed: %s (took %v)",
-    queryString, duration))
-```
+type ZerologAdapter struct{ l zerolog.Logger }
 
-### 2. Consistent Log Levels
+func NewZerolog(l zerolog.Logger) *ZerologAdapter { return &ZerologAdapter{l: l} }
 
-Use appropriate log levels consistently:
-
-```go
-// Error - for actual errors
-logger.Error("failed to process payment",
-    "error", err,
-    "user_id", userID)
-
-// Debug - for detailed troubleshooting information
-logger.Debug("attempting payment processing",
-    "payment_provider", provider,
-    "amount", amount)
-
-// Info - for tracking normal operations
-logger.Info("payment processed successfully",
-    "transaction_id", txID,
-    "amount", amount)
-```
-
-### 3. Context Preservation
-
-Ensure context is preserved through the logging chain:
-
-```go
-func processWithContext(ctx context.Context) error {
-    logger := getContextLogger(ctx)
-
-    // Add request-specific context
-    requestLogger := enrichLoggerWithContext(logger, ctx)
-
-    err := performOperation()
-    if err != nil {
-        return ewrap.Wrap(err, "operation failed",
-            ewrap.WithLogger(requestLogger),
-            ewrap.WithContext(ctx, ewrap.ErrorTypeInternal, ewrap.SeverityError))
+func (a *ZerologAdapter) emit(ev *zerolog.Event, msg string, kv []any) {
+    for i := 0; i+1 < len(kv); i += 2 {
+        if k, ok := kv[i].(string); ok {
+            ev = ev.Interface(k, kv[i+1])
+        }
     }
-
-    return nil
+    ev.Msg(msg)
 }
 
-func enrichLoggerWithContext(logger Logger, ctx context.Context) Logger {
-    // Extract common context values
-    requestID := ctx.Value("request_id")
-    userID := ctx.Value("user_id")
-
-    return &ContextLogger{
-        base:      logger,
-        requestID: requestID.(string),
-        userID:    userID.(string),
-    }
-}
+func (a *ZerologAdapter) Error(msg string, kv ...any) { a.emit(a.l.Error(), msg, kv) }
+func (a *ZerologAdapter) Debug(msg string, kv ...any) { a.emit(a.l.Debug(), msg, kv) }
+func (a *ZerologAdapter) Info(msg string, kv ...any)  { a.emit(a.l.Info(), msg, kv) }
 ```
+
+Drop one of these into your codebase, pass an instance to `WithLogger`,
+and you're done. ewrap stays free of those dependencies.
+
+## Recovery suggestions in log output
+
+When you attach a `RecoverySuggestion`, `(*Error).Log` automatically
+expands it into structured fields:
+
+```go
+err := ewrap.New("DB unreachable",
+    ewrap.WithLogger(logger),
+    ewrap.WithRecoverySuggestion(&ewrap.RecoverySuggestion{
+        Message:       "Verify pool sizing and credentials.",
+        Actions:       []string{"reset pool", "rotate creds"},
+        Documentation: "https://runbooks.example.com/db",
+    }))
+
+err.Log()
+// Fields emitted: error, stack, recovery_message, recovery_actions,
+// recovery_documentation
+```
+
+## Best practices
+
+- **Set the logger near the root** so wraps inherit it, instead of
+  threading `WithLogger` through every layer.
+- **Don't log inside libraries** — return the error and let the caller
+  decide. `WithLogger` is for application-layer code.
+- **Use slog directly** for new projects unless you've already standardised
+  on another logger. `LogValuer` gives you fully structured output with no
+  adapter at all.
+- **Keep adapters in a single internal package** in your own repo so all
+  of your services share the same logger choice without ewrap having to
+  pick one.
