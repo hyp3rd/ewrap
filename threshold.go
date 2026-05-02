@@ -129,7 +129,11 @@ func (cb *CircuitBreaker) CanExecute() bool {
 			event = cb.setStateLocked(CircuitHalfOpen)
 			can = true
 		}
+	default:
+		// Unknown state — refuse to execute and record nothing. Defensive
+		// only; CircuitState is a closed enum.
 	}
+
 	cb.mu.Unlock()
 
 	cb.fireTransition(event)

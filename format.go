@@ -1,12 +1,12 @@
 package ewrap
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"time"
 
+	"github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 
@@ -71,8 +71,8 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	output := &ErrorOutput{
 		Message:   e.msg,
 		Timestamp: time.Now().Format(time.RFC3339),
-		Type:      "unknown",
-		Severity:  "error",
+		Type:      typeUnknownStr,
+		Severity:  severityErrorStr,
 		Stack:     e.Stack(),
 		Metadata:  metadataCopy,
 		Recovery:  e.recovery,
@@ -113,8 +113,8 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 func standardErrorOutput(err error) *ErrorOutput {
 	out := &ErrorOutput{
 		Message:  err.Error(),
-		Type:     "unknown",
-		Severity: "error",
+		Type:     typeUnknownStr,
+		Severity: severityErrorStr,
 	}
 
 	cause := errors.Unwrap(err)

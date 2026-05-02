@@ -1,7 +1,6 @@
 package ewrap
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -13,7 +12,7 @@ func TestHTTPStatus(t *testing.T) {
 	t.Run("unset returns zero", func(t *testing.T) {
 		t.Parallel()
 
-		err := New("plain")
+		err := New(msgPlain)
 		if got := HTTPStatus(err); got != 0 {
 			t.Errorf("got %d, want 0", got)
 		}
@@ -42,7 +41,7 @@ func TestHTTPStatus(t *testing.T) {
 	t.Run("non-ewrap error returns zero", func(t *testing.T) {
 		t.Parallel()
 
-		if got := HTTPStatus(errors.New("plain")); got != 0 {
+		if got := HTTPStatus(errPlain); got != 0 {
 			t.Errorf("got %d, want 0", got)
 		}
 	})
@@ -72,7 +71,7 @@ func TestIsRetryable(t *testing.T) {
 	t.Run("unset and no Temporary defaults false", func(t *testing.T) {
 		t.Parallel()
 
-		if IsRetryable(New("plain")) {
+		if IsRetryable(New(msgPlain)) {
 			t.Error("expected retryable false for unclassified error")
 		}
 	})
@@ -146,22 +145,34 @@ func TestSafeError(t *testing.T) {
 func TestFormatVerbs(t *testing.T) {
 	t.Parallel()
 
-	err := New("boom")
+	err := New(msgBoom)
 
-	if got := fmt.Sprintf("%s", err); got != "boom" {
-		t.Errorf("%%s: got %q, want %q", got, "boom")
+	if got := fmt.Sprintf("%s", err); got != msgBoom {
+		t.Errorf("%%s: got %q, want %q", got, msgBoom)
 	}
 
-	if got := fmt.Sprintf("%v", err); got != "boom" {
-		t.Errorf("%%v: got %q, want %q", got, "boom")
+	if got := fmt.Sprintf("%v", err); got != msgBoom {
+		t.Errorf("%%v: got %q, want %q", got, msgBoom)
 	}
 
-	if got := fmt.Sprintf("%q", err); got != `"boom"` {
-		t.Errorf("%%q: got %q, want %q", got, `"boom"`)
+	const quotedBoom = `"boom"`
+
+	if got := fmt.Sprintf("%q", err); got != quotedBoom {
+		t.Errorf("%%q: got %q, want %q", got, quotedBoom)
 	}
 
 	plus := fmt.Sprintf("%+v", err)
-	if plus == "boom" || plus[:len("boom")] != "boom" {
+	if !errorStartsWithMessage(plus, msgBoom) {
 		t.Errorf("%%+v: got %q, expected message followed by stack", plus)
 	}
+}
+
+// errorStartsWithMessage tests that the formatted output begins with the
+// expected error message and includes additional content (the stack trace).
+func errorStartsWithMessage(formatted, message string) bool {
+	if len(formatted) <= len(message) {
+		return false
+	}
+
+	return formatted[:len(message)] == message
 }

@@ -2,7 +2,6 @@ package ewrap
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 )
 
@@ -13,22 +12,20 @@ import (
 //	%q   double-quoted error message
 //	%v   the error message (default)
 //	%+v  the error message followed by the stack trace
-func (e *Error) Format(s fmt.State, verb rune) {
+func (e *Error) Format(state fmt.State, verb rune) {
 	switch verb {
 	case 'v':
-		if s.Flag('+') {
-			_, _ = io.WriteString(s, e.Error())
-			_, _ = io.WriteString(s, "\n")
-			_, _ = io.WriteString(s, e.Stack())
+		if state.Flag('+') {
+			fmt.Fprintf(state, "%s\n%s", e.Error(), e.Stack())
 
 			return
 		}
 
-		fallthrough
-	case 's':
-		_, _ = io.WriteString(s, e.Error())
+		fmt.Fprint(state, e.Error())
 	case 'q':
-		_, _ = fmt.Fprintf(s, "%q", e.Error())
+		fmt.Fprintf(state, "%q", e.Error())
+	default:
+		fmt.Fprint(state, e.Error())
 	}
 }
 

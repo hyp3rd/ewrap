@@ -25,6 +25,8 @@ func (t *testObserver) RecordCircuitStateTransition(name string, from, to Circui
 }
 
 func TestErrorLogRecordsObserver(t *testing.T) {
+	t.Parallel()
+
 	obs := &testObserver{}
 
 	err := New("boom", WithObserver(obs))
@@ -36,24 +38,26 @@ func TestErrorLogRecordsObserver(t *testing.T) {
 }
 
 func TestCircuitBreakerObserver(t *testing.T) {
+	t.Parallel()
+
 	obs := &testObserver{}
 
 	timeout := 10 * time.Millisecond
-	cb := NewCircuitBreakerWithObserver("test", 1, timeout, obs)
+	cb := NewCircuitBreakerWithObserver(msgTest, 1, timeout, obs)
 
 	cb.RecordFailure()
 	time.Sleep(timeout + time.Millisecond)
 
 	if !cb.CanExecute() {
-		t.Fatalf("expected circuit breaker to allow execution after timeout")
+		t.Fatal("expected circuit breaker to allow execution after timeout")
 	}
 
 	cb.RecordSuccess()
 
 	expected := []stateChange{
-		{name: "test", from: CircuitClosed, to: CircuitOpen},
-		{name: "test", from: CircuitOpen, to: CircuitHalfOpen},
-		{name: "test", from: CircuitHalfOpen, to: CircuitClosed},
+		{name: msgTest, from: CircuitClosed, to: CircuitOpen},
+		{name: msgTest, from: CircuitOpen, to: CircuitHalfOpen},
+		{name: msgTest, from: CircuitHalfOpen, to: CircuitClosed},
 	}
 
 	if len(obs.transitions) != len(expected) {
@@ -69,38 +73,35 @@ func TestCircuitBreakerObserver(t *testing.T) {
 }
 
 func TestObserverInheritanceInWrap(t *testing.T) {
+	t.Parallel()
+
 	obs := &testObserver{}
 
-	// Create original error with observer
 	original := New("original error", WithObserver(obs))
 
-	// Wrap the error - should inherit the observer
 	wrapped := Wrap(original, "wrapped error")
 
-	// Log both errors
 	original.Log()
 	wrapped.Log()
 
-	// Should record 2 errors
 	if obs.errorCount != 2 {
 		t.Fatalf("expected 2 errors recorded, got %d", obs.errorCount)
 	}
 }
 
 func TestCircuitBreakerSetObserver(t *testing.T) {
+	t.Parallel()
+
 	obs := &testObserver{}
 
-	// Create circuit breaker without observer
-	cb := NewCircuitBreaker("test", 1, 10*time.Millisecond)
+	cb := NewCircuitBreaker(msgTest, 1, 10*time.Millisecond)
 
-	// Set observer later
 	cb.SetObserver(obs)
 
-	// Trigger a state transition
 	cb.RecordFailure()
 
 	expected := []stateChange{
-		{name: "test", from: CircuitClosed, to: CircuitOpen},
+		{name: msgTest, from: CircuitClosed, to: CircuitOpen},
 	}
 
 	if len(obs.transitions) != len(expected) {
@@ -113,11 +114,11 @@ func TestCircuitBreakerSetObserver(t *testing.T) {
 }
 
 func TestObserverIsOptional(t *testing.T) {
-	// Create error without observer - should not panic
-	err := New("test error")
+	t.Parallel()
+
+	err := New(msgTestError)
 	err.Log() // Should not panic
 
-	// Create circuit breaker without observer - should not panic
-	cb := NewCircuitBreaker("test", 1, 10*time.Millisecond)
+	cb := NewCircuitBreaker(msgTest, 1, 10*time.Millisecond)
 	cb.RecordFailure() // Should not panic
 }

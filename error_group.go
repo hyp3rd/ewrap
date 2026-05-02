@@ -1,7 +1,6 @@
 package ewrap
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 

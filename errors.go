@@ -142,7 +142,9 @@ func newfAt(skip int, format string, args ...any) *Error {
 		return newAt(skip+1, fmt.Sprintf(format, args...))
 	}
 
-	formatted := fmt.Errorf(format, args...)
+	// fmt.Errorf is the only way to extract the cause produced by %w; the
+	// dynamic error it returns is transient and never escapes this function.
+	formatted := fmt.Errorf(format, args...) //nolint:err113 // intentional %w extraction
 
 	var cause error
 	if u, ok := formatted.(interface{ Unwrap() error }); ok {

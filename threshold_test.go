@@ -6,19 +6,27 @@ import (
 	"time"
 )
 
-func TestNewCircuitBreaker(t *testing.T) {
-	name := "test-circuit"
-	maxFailures := 3
-	timeout := 5 * time.Second
+const (
+	thresholdMaxFailures      = 3
+	thresholdConcurrency      = 100
+	thresholdTimeoutSeconds   = 5
+	thresholdConcurrencyLimit = 100
+)
 
-	cb := NewCircuitBreaker(name, maxFailures, timeout)
+func TestNewCircuitBreaker(t *testing.T) {
+	t.Parallel()
+
+	const name = "test-circuit"
+
+	timeout := thresholdTimeoutSeconds * time.Second
+	cb := NewCircuitBreaker(name, thresholdMaxFailures, timeout)
 
 	if cb.name != name {
 		t.Errorf("Expected name %s, got %s", name, cb.name)
 	}
 
-	if cb.maxFailures != maxFailures {
-		t.Errorf("Expected maxFailures %d, got %d", maxFailures, cb.maxFailures)
+	if cb.maxFailures != thresholdMaxFailures {
+		t.Errorf("Expected maxFailures %d, got %d", thresholdMaxFailures, cb.maxFailures)
 	}
 
 	if cb.timeout != timeout {
@@ -35,9 +43,10 @@ func TestNewCircuitBreaker(t *testing.T) {
 }
 
 func TestCircuitBreakerRecordFailure(t *testing.T) {
-	cb := NewCircuitBreaker("test", 2, 5*time.Second)
+	t.Parallel()
 
-	// First failure - should remain closed
+	cb := NewCircuitBreaker(msgTest, 2, thresholdTimeoutSeconds*time.Second)
+
 	cb.RecordFailure()
 
 	if cb.state != CircuitClosed {
@@ -48,7 +57,6 @@ func TestCircuitBreakerRecordFailure(t *testing.T) {
 		t.Errorf("Expected failure count 1, got %d", cb.failureCount)
 	}
 
-	// Second failure - should open circuit
 	cb.RecordFailure()
 
 	if cb.state != CircuitOpen {
@@ -61,21 +69,20 @@ func TestCircuitBreakerRecordFailure(t *testing.T) {
 }
 
 func TestCircuitBreakerRecordSuccess(t *testing.T) {
-	cb := NewCircuitBreaker("test", 1, 5*time.Second)
+	t.Parallel()
 
-	// Record failure to open circuit
+	cb := NewCircuitBreaker(msgTest, 1, thresholdTimeoutSeconds*time.Second)
+
 	cb.RecordFailure()
 
 	if cb.state != CircuitOpen {
 		t.Error("Expected circuit to be open")
 	}
 
-	// Manually set to half-open
 	cb.mu.Lock()
 	cb.state = CircuitHalfOpen
 	cb.mu.Unlock()
 
-	// Record success - should close circuit
 	cb.RecordSuccess()
 
 	if cb.state != CircuitClosed {
@@ -88,29 +95,27 @@ func TestCircuitBreakerRecordSuccess(t *testing.T) {
 }
 
 func TestCircuitBreakerCanExecute(t *testing.T) {
-	timeout := 100 * time.Millisecond
-	cb := NewCircuitBreaker("test", 1, timeout)
+	t.Parallel()
 
-	// Initially closed - should allow execution
+	timeout := thresholdConcurrencyLimit * time.Millisecond
+	cb := NewCircuitBreaker(msgTest, 1, timeout)
+
 	if !cb.CanExecute() {
 		t.Error("Expected CanExecute to return true for closed circuit")
 	}
 
-	// Record failure to open circuit
 	cb.RecordFailure()
 
 	if cb.CanExecute() {
 		t.Error("Expected CanExecute to return false for open circuit")
 	}
 
-	// Wait for timeout and check transition to half-open
 	time.Sleep(timeout + 10*time.Millisecond)
 
 	if !cb.CanExecute() {
 		t.Error("Expected CanExecute to return true after timeout (half-open)")
 	}
 
-	// Verify state is now half-open
 	cb.mu.Lock()
 	state := cb.state
 	cb.mu.Unlock()
@@ -121,66 +126,65 @@ func TestCircuitBreakerCanExecute(t *testing.T) {
 }
 
 func TestCircuitBreakerOnStateChange(t *testing.T) {
-	cb := NewCircuitBreaker("test", 1, 5*time.Second)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(msgTest, 1, thresholdTimeoutSeconds*time.Second)
+
+	type recordedChange struct {
+		name string
+		from CircuitState
+		to   CircuitState
+	}
 
 	var (
-		stateChanges []struct {
-			name string
-			from CircuitState
-			to   CircuitState
-		}
-		mu sync.Mutex
+		stateChanges []recordedChange
+		mu           sync.Mutex
 	)
 
 	cb.OnStateChange(func(name string, from, to CircuitState) {
 		mu.Lock()
 
-		stateChanges = append(stateChanges, struct {
-			name string
-			from CircuitState
-			to   CircuitState
-		}{name, from, to})
+		stateChanges = append(stateChanges, recordedChange{name, from, to})
 
 		mu.Unlock()
 	})
 
-	// Record failure to trigger state change. Callback fires synchronously
-	// once the breaker lock has been released, so no sleep is needed.
 	cb.RecordFailure()
 
 	mu.Lock()
+	defer mu.Unlock()
 
 	if len(stateChanges) != 1 {
 		t.Errorf("Expected 1 state change, got %d", len(stateChanges))
-	} else {
-		change := stateChanges[0]
-		if change.name != "test" {
-			t.Errorf("Expected name 'test', got %s", change.name)
-		}
 
-		if change.from != CircuitClosed {
-			t.Errorf("Expected from state %v, got %v", CircuitClosed, change.from)
-		}
-
-		if change.to != CircuitOpen {
-			t.Errorf("Expected to state %v, got %v", CircuitOpen, change.to)
-		}
+		return
 	}
 
-	mu.Unlock()
+	change := stateChanges[0]
+	if change.name != msgTest {
+		t.Errorf("Expected name %q, got %s", msgTest, change.name)
+	}
+
+	if change.from != CircuitClosed {
+		t.Errorf("Expected from state %v, got %v", CircuitClosed, change.from)
+	}
+
+	if change.to != CircuitOpen {
+		t.Errorf("Expected to state %v, got %v", CircuitOpen, change.to)
+	}
 }
 
 func TestCircuitBreakerTransitionViaPublicAPI(t *testing.T) {
-	cb := NewCircuitBreaker("test", 1, 5*time.Second)
+	t.Parallel()
 
-	// Single failure trips the circuit (maxFailures=1).
+	cb := NewCircuitBreaker(msgTest, 1, thresholdTimeoutSeconds*time.Second)
+
 	cb.RecordFailure()
 
 	if cb.state != CircuitOpen {
 		t.Errorf("Expected state %v, got %v", CircuitOpen, cb.state)
 	}
 
-	// A second failure does not change state away from Open.
 	cb.RecordFailure()
 
 	if cb.state != CircuitOpen {
@@ -189,21 +193,19 @@ func TestCircuitBreakerTransitionViaPublicAPI(t *testing.T) {
 }
 
 func TestCircuitBreakerConcurrency(t *testing.T) {
-	cb := NewCircuitBreaker("test", 5, 100*time.Millisecond)
+	t.Parallel()
+
+	cb := NewCircuitBreaker(msgTest, thresholdTimeoutSeconds, thresholdConcurrencyLimit*time.Millisecond)
 
 	var wg sync.WaitGroup
 
-	iterations := 100
-
-	// Test concurrent RecordFailure calls
-	for range iterations {
+	for range thresholdConcurrency {
 		wg.Go(func() {
 			cb.RecordFailure()
 		})
 	}
 
-	// Test concurrent CanExecute calls
-	for range iterations {
+	for range thresholdConcurrency {
 		wg.Go(func() {
 			cb.CanExecute()
 		})
@@ -211,13 +213,14 @@ func TestCircuitBreakerConcurrency(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify circuit is in expected state
 	if cb.state != CircuitOpen {
 		t.Errorf("Expected circuit to be open after many failures, got %v", cb.state)
 	}
 }
 
 func TestCircuitStates(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		state    CircuitState
 		expected CircuitState

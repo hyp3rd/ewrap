@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
 	"testing"
@@ -13,133 +14,155 @@ import (
 	"github.com/hyp3rd/ewrap"
 )
 
+const (
+	profileIterations    = 10000
+	profileWrapDepth     = 10
+	profileGoroutines    = 100
+	profileGoroutineWork = 1000
+	profileGroupAdds     = 5
+	profileBreakerMax    = 1000
+)
+
+var (
+	errHeapProfileMissing      = errors.New("could not find heap profile")
+	errGoroutineProfileMissing = errors.New("could not find goroutine profile")
+)
+
+type profileCase struct {
+	name    string
+	setup   func()
+	cleanup func()
+	profile func(file *os.File) error
+}
+
+func cpuProfileCase() profileCase {
+	return profileCase{
+		name:    "cpu",
+		setup:   func() {},
+		cleanup: func() {},
+		profile: func(file *os.File) error {
+			err := pprof.StartCPUProfile(file)
+			if err != nil {
+				return fmt.Errorf("could not start CPU profile: %w", err)
+			}
+
+			profileCPU()
+			pprof.StopCPUProfile()
+
+			return nil
+		},
+	}
+}
+
+func heapProfileCase() profileCase {
+	return profileCase{
+		name:    "heap",
+		setup:   forceGC,
+		cleanup: forceGC,
+		profile: func(file *os.File) error {
+			prof := pprof.Lookup("heap")
+			if prof == nil {
+				return errHeapProfileMissing
+			}
+
+			profileMemory()
+
+			return prof.WriteTo(file, 0)
+		},
+	}
+}
+
+func goroutineProfileCase() profileCase {
+	return profileCase{
+		name:    "goroutine",
+		setup:   func() {},
+		cleanup: func() {},
+		profile: func(file *os.File) error {
+			prof := pprof.Lookup("goroutine")
+			if prof == nil {
+				return errGoroutineProfileMissing
+			}
+
+			profileGoroutinesFn()
+
+			return prof.WriteTo(file, 0)
+		},
+	}
+}
+
+// forceGC explicitly triggers garbage collection so heap profiles capture a
+// post-collection snapshot. Profile-only helper; production code never needs
+// this.
+func forceGC() {
+	runtime.GC() //nolint:revive // explicit GC is intentional for profile snapshots
+}
+
 // TestProfileErrorOperations runs a comprehensive profiling suite for error operations.
 // It generates CPU, memory, and goroutine profiles to analyze the performance characteristics
 // of our error handling implementation.
+//
+// This test mutates the global runtime.MemProfileRate and emits profile files
+// to the working directory, so it cannot be parallelised.
+//
+//nolint:paralleltest // mutates runtime.MemProfileRate global state
 func TestProfileErrorOperations(t *testing.T) {
-	// Skip in normal testing
 	if testing.Short() {
 		t.Skip("Skipping profiling in short mode")
 	}
 
-	// Enable memory profiling with a rate of 1 means we sample every allocation
 	runtime.MemProfileRate = 1
 
-	profiles := []struct {
-		name     string
-		profName string // The name pprof uses internally
-		setup    func()
-		cleanup  func()
-		profile  func(f *os.File) error
-	}{
-		{
-			name: "cpu",
-			setup: func() {
-				// No specific setup needed for CPU profiling
-			},
-			cleanup: func() {
-				// No specific cleanup needed for CPU profiling
-			},
-			profile: func(f *os.File) error {
-				err := pprof.StartCPUProfile(f)
-				if err != nil {
-					return fmt.Errorf("could not start CPU profile: %w", err)
-				}
-
-				profileCPU()
-				pprof.StopCPUProfile()
-
-				return nil
-			},
-		},
-		{
-			name:     "heap",
-			profName: "heap",
-			setup: func() {
-				// Force garbage collection before memory profiling
-				runtime.GC()
-			},
-			cleanup: func() {
-				// Force garbage collection after memory profiling
-				runtime.GC()
-			},
-			profile: func(f *os.File) error {
-				p := pprof.Lookup("heap")
-				if p == nil {
-					return errors.New("could not find heap profile")
-				}
-
-				profileMemory()
-
-				return p.WriteTo(f, 0)
-			},
-		},
-		{
-			name:     "goroutine",
-			profName: "goroutine",
-			setup:    func() {},
-			cleanup:  func() {},
-			profile: func(f *os.File) error {
-				p := pprof.Lookup("goroutine")
-				if p == nil {
-					return errors.New("could not find goroutine profile")
-				}
-
-				profileGoroutines()
-
-				return p.WriteTo(f, 0)
-			},
-		},
-	}
-
-	for _, profile := range profiles {
+	for _, profile := range []profileCase{cpuProfileCase(), heapProfileCase(), goroutineProfileCase()} {
+		//nolint:paralleltest // sequential by design — see TestProfileErrorOperations
 		t.Run(profile.name, func(t *testing.T) {
-			// Create profile file
-			filename := fmt.Sprintf("profile_%s.prof", profile.name)
-
-			f, err := os.Create(filename)
-			if err != nil {
-				t.Fatalf("could not create %s profile file: %v", profile.name, err)
-			}
-
-			defer func() {
-				err := f.Close()
-				if err != nil {
-					t.Errorf("error closing profile file: %v", err)
-				}
-			}()
-
-			// Run setup
-			profile.setup()
-
-			// Run profiling
-			if err := profile.profile(f); err != nil {
-				t.Fatalf("error writing %s profile: %v", profile.name, err)
-			}
-
-			// Run cleanup
-			profile.cleanup()
-
-			t.Logf("Profile written to %s", filename)
+			runProfileCase(t, profile)
 		})
 	}
 }
 
+func runProfileCase(t *testing.T, profile profileCase) {
+	t.Helper()
+
+	filename := filepath.Clean(fmt.Sprintf("profile_%s.prof", profile.name))
+
+	file, err := os.Create(filename)
+	if err != nil {
+		t.Fatalf("could not create %s profile file: %v", profile.name, err)
+	}
+
+	defer func() {
+		closeErr := file.Close()
+		if closeErr != nil {
+			t.Errorf("error closing profile file: %v", closeErr)
+		}
+	}()
+
+	profile.setup()
+
+	profileErr := profile.profile(file)
+	if profileErr != nil {
+		t.Fatalf("error writing %s profile: %v", profile.name, profileErr)
+	}
+
+	profile.cleanup()
+
+	t.Logf("Profile written to %s", filename)
+}
+
 func profileCPU() {
-	// Simulate intensive error handling operations
 	ctx := context.Background()
 	logger := &mockLogger{}
 
-	for i := range 10000 {
+	for i := range profileIterations {
 		err := ewrap.New(fmt.Sprintf("error %d", i),
 			ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical),
 			ewrap.WithLogger(logger))
 
 		err = ewrap.Wrap(err, "wrapped")
-		err.WithMetadata("key", i)
+		_ = err.WithMetadata("key", i)
 
 		group := ewrap.NewErrorGroup()
-		for range 5 {
+		for range profileGroupAdds {
 			group.Add(err)
 		}
 
@@ -149,56 +172,54 @@ func profileCPU() {
 }
 
 func profileMemory() {
-	// Force GC before profiling
-	runtime.GC()
+	forceGC()
 
-	// Simulate memory-intensive operations
-	var errors []*ewrap.Error
-
+	captured := make([]*ewrap.Error, 0, profileIterations)
 	ctx := context.Background()
 
-	for i := range 10000 {
+	for i := range profileIterations {
 		err := ewrap.New(fmt.Sprintf("error %d", i),
 			ewrap.WithContext(ctx, ewrap.ErrorTypeDatabase, ewrap.SeverityCritical))
 
-		for j := range 10 {
+		for j := range profileWrapDepth {
 			err = ewrap.Wrap(err, fmt.Sprintf("layer %d", j))
-			err.WithMetadata(fmt.Sprintf("key%d", j), j)
+			_ = err.WithMetadata(fmt.Sprintf("key%d", j), j)
 		}
 
-		errors = append(errors, err)
+		captured = append(captured, err)
 	}
 
-	for err := range errors {
-		fmt.Printf("err: %v\n", err)
+	if len(captured) == 0 {
+		panic("captured slice unexpectedly empty")
 	}
 }
 
-func profileGoroutines() {
-	// Simulate concurrent error handling
-	const numGoroutines = 100
-
+func profileGoroutinesFn() {
 	done := make(chan bool)
 
-	cb := ewrap.NewCircuitBreaker("test", 1000, time.Second)
+	cb := ewrap.NewCircuitBreaker("test", profileBreakerMax, time.Second)
 
-	for i := range numGoroutines {
-		go func(id int) {
-			for j := range 1000 {
-				if cb.CanExecute() {
-					err := ewrap.New(fmt.Sprintf("error %d-%d", id, j))
-					err.WithMetadata("goroutine", id)
-					cb.RecordSuccess()
-				} else {
-					cb.RecordFailure()
-				}
-			}
-
-			done <- true
-		}(i)
+	for i := range profileGoroutines {
+		go runProfileGoroutine(cb, i, done)
 	}
 
-	for range numGoroutines {
+	for range profileGoroutines {
 		<-done
 	}
+}
+
+func runProfileGoroutine(cb *ewrap.CircuitBreaker, id int, done chan<- bool) {
+	for j := range profileGoroutineWork {
+		if cb.CanExecute() {
+			err := ewrap.New(fmt.Sprintf("error %d-%d", id, j))
+
+			_ = err.WithMetadata("goroutine", id)
+
+			cb.RecordSuccess()
+		} else {
+			cb.RecordFailure()
+		}
+	}
+
+	done <- true
 }

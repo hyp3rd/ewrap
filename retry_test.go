@@ -6,17 +6,18 @@ import (
 )
 
 func TestWithRetry(t *testing.T) {
-	maxAttempts := 3
+	t.Parallel()
+
 	delay := time.Second
-	err := New("test error", WithRetry(maxAttempts, delay))
+	err := New(msgTestError, WithRetry(defaultMaxAttempts, delay))
 
 	retryInfo := err.Retry()
 	if retryInfo == nil {
 		t.Fatal("expected non-nil retry info")
 	}
 
-	if retryInfo.MaxAttempts != maxAttempts {
-		t.Errorf("MaxAttempts: got %d, want %d", retryInfo.MaxAttempts, maxAttempts)
+	if retryInfo.MaxAttempts != defaultMaxAttempts {
+		t.Errorf("MaxAttempts: got %d, want %d", retryInfo.MaxAttempts, defaultMaxAttempts)
 	}
 
 	if retryInfo.Delay != delay {
@@ -37,8 +38,12 @@ func TestWithRetry(t *testing.T) {
 }
 
 func TestCanRetry(t *testing.T) {
+	t.Parallel()
+
 	t.Run("WithValidRetryInfo", func(t *testing.T) {
-		err := New("test error", WithRetry(3, time.Second))
+		t.Parallel()
+
+		err := New(msgTestError, WithRetry(defaultMaxAttempts, time.Second))
 		if !err.CanRetry() {
 			t.Error("expected CanRetry true with attempts remaining")
 		}
@@ -63,7 +68,9 @@ func TestCanRetry(t *testing.T) {
 	})
 
 	t.Run("WithoutRetryInfo", func(t *testing.T) {
-		err := New("test error")
+		t.Parallel()
+
+		err := New(msgTestError)
 		if err.CanRetry() {
 			t.Error("expected CanRetry false without retry info")
 		}
@@ -71,8 +78,10 @@ func TestCanRetry(t *testing.T) {
 }
 
 func TestWithRetryCustomShouldRetry(t *testing.T) {
+	t.Parallel()
+
 	shouldRetry := func(error) bool { return false }
-	err := New("test error", WithRetry(3, time.Second, WithRetryShould(shouldRetry)))
+	err := New(msgTestError, WithRetry(defaultMaxAttempts, time.Second, WithRetryShould(shouldRetry)))
 
 	if err.CanRetry() {
 		t.Error("expected CanRetry false with predicate returning false")
@@ -80,7 +89,11 @@ func TestWithRetryCustomShouldRetry(t *testing.T) {
 }
 
 func TestDefaultShouldRetry(t *testing.T) {
+	t.Parallel()
+
 	t.Run("ValidationError", func(t *testing.T) {
+		t.Parallel()
+
 		err := New("validation error").
 			WithContext(&ErrorContext{Type: ErrorTypeValidation})
 		if defaultShouldRetry(err) {
@@ -89,6 +102,8 @@ func TestDefaultShouldRetry(t *testing.T) {
 	})
 
 	t.Run("OtherError", func(t *testing.T) {
+		t.Parallel()
+
 		err := New("other error").
 			WithContext(&ErrorContext{Type: ErrorTypeInternal})
 		if !defaultShouldRetry(err) {
@@ -97,6 +112,8 @@ func TestDefaultShouldRetry(t *testing.T) {
 	})
 
 	t.Run("NoContext", func(t *testing.T) {
+		t.Parallel()
+
 		err := New("no context error")
 		if !defaultShouldRetry(err) {
 			t.Error("expected defaultShouldRetry true when no context set")
@@ -105,8 +122,12 @@ func TestDefaultShouldRetry(t *testing.T) {
 }
 
 func TestIncrementRetry(t *testing.T) {
+	t.Parallel()
+
 	t.Run("WithRetryInfo", func(t *testing.T) {
-		err := New("test error", WithRetry(3, time.Second))
+		t.Parallel()
+
+		err := New(msgTestError, WithRetry(defaultMaxAttempts, time.Second))
 		initialTime := err.Retry().LastAttempt
 
 		time.Sleep(time.Millisecond)
@@ -123,7 +144,9 @@ func TestIncrementRetry(t *testing.T) {
 	})
 
 	t.Run("WithoutRetryInfo", func(t *testing.T) {
-		err := New("test error")
+		t.Parallel()
+
+		err := New(msgTestError)
 		err.IncrementRetry() // Should not panic
 	})
 }

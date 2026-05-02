@@ -8,24 +8,41 @@ import (
 	"testing"
 )
 
-// MockLogger implements the logger.Logger interface for testing.
+const (
+	concurrentMetadataIters = 100
+	formatNumber            = 42
+	wrapfFormat             = "wrapped %d"
+	expectedDebugCalls      = 1
+	metadataIntValue        = 5
+)
+
+// MockLogger implements the Logger interface for testing.
 type MockLogger struct {
 	mu     sync.Mutex
 	logs   []LogEntry
 	called map[string]int
 }
 
+// LogEntry captures one logged message and its arguments.
 type LogEntry struct {
 	Level string
 	Msg   string
 	Args  []any
 }
 
+// NewMockLogger constructs a fresh MockLogger.
+func NewMockLogger() *MockLogger {
+	return &MockLogger{
+		logs:   make([]LogEntry, 0),
+		called: make(map[string]int),
+	}
+}
+
 func (m *MockLogger) Info(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.logs = append(m.logs, LogEntry{Level: "info", Msg: msg, Args: args})
+	m.logs = append(m.logs, LogEntry{Level: severityInfoStr, Msg: msg, Args: args})
 }
 
 func (m *MockLogger) Debug(msg string, args ...any) {
@@ -40,15 +57,8 @@ func (m *MockLogger) Error(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.logs = append(m.logs, LogEntry{Level: "error", Msg: msg, Args: args})
-	m.called["error"]++
-}
-
-func NewMockLogger() *MockLogger {
-	return &MockLogger{
-		logs:   make([]LogEntry, 0),
-		called: make(map[string]int),
-	}
+	m.logs = append(m.logs, LogEntry{Level: severityErrorStr, Msg: msg, Args: args})
+	m.called[severityErrorStr]++
 }
 
 func (m *MockLogger) GetLogs() []LogEntry {
@@ -66,168 +76,206 @@ func (m *MockLogger) GetCallCount(level string) int {
 }
 
 func TestNew(t *testing.T) {
-	t.Run("creates error with message", func(t *testing.T) {
-		err := New("test error")
-		if err.Error() != "test error" {
-			t.Errorf("expected 'test error', got '%s'", err.Error())
-		}
+	t.Parallel()
 
-		if len(err.stack) == 0 {
-			t.Error("expected stack trace to be captured")
-		}
+	t.Run("creates error with message", testNewCreates)
+	t.Run("applies options", testNewAppliesOptions)
+}
 
-		// metadata is initialized lazily on first WithMetadata; nil here is
-		// the expected steady state for an error with no user metadata.
-		if err.metadata != nil {
-			t.Errorf("expected nil metadata before first write, got %v", err.metadata)
-		}
+func testNewCreates(t *testing.T) {
+	t.Parallel()
 
-		err.WithMetadata("k", "v")
+	err := New(msgTestError)
+	if err.Error() != msgTestError {
+		t.Errorf("expected %q, got %q", msgTestError, err.Error())
+	}
 
-		if err.metadata == nil {
-			t.Error("expected metadata to be initialized after WithMetadata")
-		}
-	})
+	if len(err.stack) == 0 {
+		t.Error("expected stack trace to be captured")
+	}
 
-	t.Run("applies options", func(t *testing.T) {
-		mockLogger := NewMockLogger()
+	if err.metadata != nil {
+		t.Errorf("expected nil metadata before first write, got %v", err.metadata)
+	}
 
-		err := New("test error", WithLogger(mockLogger))
-		if err.logger != mockLogger {
-			t.Error("expected logger to be set")
-		}
+	_ = err.WithMetadata("k", "v")
 
-		if mockLogger.GetCallCount("debug") != 1 {
-			t.Error("expected logger debug to be called once")
-		}
-	})
+	if err.metadata == nil {
+		t.Error("expected metadata to be initialized after WithMetadata")
+	}
+}
+
+func testNewAppliesOptions(t *testing.T) {
+	t.Parallel()
+
+	mockLogger := NewMockLogger()
+
+	err := New(msgTestError, WithLogger(mockLogger))
+	if err.logger != mockLogger {
+		t.Error("expected logger to be set")
+	}
+
+	if mockLogger.GetCallCount("debug") != expectedDebugCalls {
+		t.Error("expected logger debug to be called once")
+	}
 }
 
 func TestNewf(t *testing.T) {
-	err := Newf("test error %d", 42)
+	t.Parallel()
 
-	expected := "test error 42"
+	err := Newf("test error %d", formatNumber)
+
+	expected := fmt.Sprintf("test error %d", formatNumber)
 	if err.Error() != expected {
-		t.Errorf("expected '%s', got '%s'", expected, err.Error())
+		t.Errorf("expected %q, got %q", expected, err.Error())
 	}
 }
 
 func TestWrap(t *testing.T) {
-	t.Run("wraps nil error returns nil", func(t *testing.T) {
-		result := Wrap(nil, "test")
-		if result != nil {
-			t.Error("expected nil when wrapping nil error")
-		}
-	})
+	t.Parallel()
 
-	t.Run("wraps standard error", func(t *testing.T) {
-		originalErr := errors.New("original error")
-		wrapped := Wrap(originalErr, "wrapped")
+	t.Run("wraps nil error returns nil", testWrapNil)
+	t.Run("wraps standard error", testWrapStandard)
+	t.Run("wraps custom Error preserving stack and metadata", testWrapCustom)
+}
 
-		if wrapped.msg != "wrapped" {
-			t.Errorf("expected message 'wrapped', got '%s'", wrapped.msg)
-		}
+func testWrapNil(t *testing.T) {
+	t.Parallel()
 
-		if !errors.Is(wrapped.cause, originalErr) {
-			t.Error("expected cause to be set to original error")
-		}
+	result := Wrap(nil, msgTest)
+	if result != nil {
+		t.Error("expected nil when wrapping nil error")
+	}
+}
 
-		expected := "wrapped: original error"
-		if wrapped.Error() != expected {
-			t.Errorf("expected '%s', got '%s'", expected, wrapped.Error())
-		}
-	})
+func testWrapStandard(t *testing.T) {
+	t.Parallel()
 
-	t.Run("wraps custom Error preserving stack and metadata", func(t *testing.T) {
-		original := New("original").WithMetadata("key", "value")
-		wrapped := Wrap(original, "wrapped")
+	wrapped := Wrap(errOriginalLong, msgWrapped)
 
-		if len(wrapped.stack) == 0 {
-			t.Error("expected stack trace to be preserved")
-		}
+	if wrapped.msg != msgWrapped {
+		t.Errorf("expected message %q, got %q", msgWrapped, wrapped.msg)
+	}
 
-		if val, ok := wrapped.GetMetadata("key"); !ok || val != "value" {
-			t.Error("expected metadata to be preserved")
-		}
-	})
+	if !errors.Is(wrapped.cause, errOriginalLong) {
+		t.Error("expected cause to be set to original error")
+	}
+
+	expected := msgWrapped + ": " + msgOriginalErr
+	if wrapped.Error() != expected {
+		t.Errorf("expected %q, got %q", expected, wrapped.Error())
+	}
+}
+
+func testWrapCustom(t *testing.T) {
+	t.Parallel()
+
+	original := New(msgOriginal).WithMetadata(msgKey, msgValue)
+	wrapped := Wrap(original, msgWrapped)
+
+	if len(wrapped.stack) == 0 {
+		t.Error("expected stack trace to be preserved")
+	}
+
+	if val, ok := wrapped.GetMetadata(msgKey); !ok || val != msgValue {
+		t.Error("expected metadata to be preserved")
+	}
 }
 
 func TestWrapf(t *testing.T) {
+	t.Parallel()
+
 	t.Run("wraps nil error returns nil", func(t *testing.T) {
-		result := Wrapf(nil, "test %d", 42)
+		t.Parallel()
+
+		result := Wrapf(nil, "test %d", formatNumber)
 		if result != nil {
 			t.Error("expected nil when wrapping nil error")
 		}
 	})
 
 	t.Run("wraps with formatted message", func(t *testing.T) {
-		originalErr := errors.New("original")
-		wrapped := Wrapf(originalErr, "wrapped %d", 42)
+		t.Parallel()
 
-		expected := "wrapped 42: original"
+		wrapped := Wrapf(errOriginal, wrapfFormat, formatNumber)
+
+		expected := fmt.Sprintf(wrapfFormat+": "+msgOriginal, formatNumber)
 		if wrapped.Error() != expected {
-			t.Errorf("expected '%s', got '%s'", expected, wrapped.Error())
+			t.Errorf("expected %q, got %q", expected, wrapped.Error())
 		}
 	})
 }
 
 func TestError_Error(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns message when no cause", func(t *testing.T) {
+		t.Parallel()
+
 		err := New("test message")
 		if err.Error() != "test message" {
-			t.Errorf("expected 'test message', got '%s'", err.Error())
+			t.Errorf("expected 'test message', got %q", err.Error())
 		}
 	})
 
 	t.Run("returns message with cause", func(t *testing.T) {
-		cause := errors.New("cause error")
-		err := Wrap(cause, "wrapped")
+		t.Parallel()
 
-		expected := "wrapped: cause error"
+		err := Wrap(errCause, msgWrapped)
+
+		expected := msgWrapped + ": " + msgCauseError
 		if err.Error() != expected {
-			t.Errorf("expected '%s', got '%s'", expected, err.Error())
+			t.Errorf("expected %q, got %q", expected, err.Error())
 		}
 	})
 }
 
 func TestError_Cause(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns nil for new error", func(t *testing.T) {
-		err := New("test")
+		t.Parallel()
+
+		err := New(msgTest)
 		if err.Cause() != nil {
 			t.Error("expected nil cause for new error")
 		}
 	})
 
 	t.Run("returns cause for wrapped error", func(t *testing.T) {
-		cause := errors.New("original")
+		t.Parallel()
 
-		wrapped := Wrap(cause, "wrapped")
-		if !errors.Is(wrapped.Cause(), cause) {
+		wrapped := Wrap(errOriginal, msgWrapped)
+		if !errors.Is(wrapped.Cause(), errOriginal) {
 			t.Error("expected cause to match original error")
 		}
 	})
 }
 
 func TestError_WithMetadata(t *testing.T) {
-	err := New("test")
-	result := err.WithMetadata("key", "value")
+	t.Parallel()
+
+	err := New(msgTest)
+	result := err.WithMetadata(msgKey, msgValue)
 
 	if result != err {
 		t.Error("expected WithMetadata to return same error instance")
 	}
 
-	val, ok := err.GetMetadata("key")
+	val, ok := err.GetMetadata(msgKey)
 	if !ok {
 		t.Error("expected metadata to be set")
 	}
 
-	if val != "value" {
-		t.Errorf("expected 'value', got '%v'", val)
+	if val != msgValue {
+		t.Errorf("expected %q, got %v", msgValue, val)
 	}
 }
 
 func TestError_WithContext(t *testing.T) {
-	err := New("test")
+	t.Parallel()
+
+	err := New(msgTest)
 	ctx := &ErrorContext{}
 	result := err.WithContext(ctx)
 
@@ -242,37 +290,45 @@ func TestError_WithContext(t *testing.T) {
 }
 
 func TestError_GetMetadata(t *testing.T) {
-	err := New("test").WithMetadata("key", "value")
+	t.Parallel()
+
+	err := New(msgTest).WithMetadata(msgKey, msgValue)
 
 	t.Run("existing key", func(t *testing.T) {
-		val, ok := err.GetMetadata("key")
+		t.Parallel()
+
+		val, ok := err.GetMetadata(msgKey)
 		if !ok {
 			t.Error("expected key to exist")
 		}
 
-		if val != "value" {
-			t.Errorf("expected 'value', got '%v'", val)
+		if val != msgValue {
+			t.Errorf("expected %q, got %v", msgValue, val)
 		}
 	})
 
 	t.Run("non-existing key", func(t *testing.T) {
+		t.Parallel()
+
 		val, ok := err.GetMetadata("nonexistent")
 		if ok {
 			t.Error("expected key to not exist")
 		}
 
 		if val != nil {
-			t.Errorf("expected nil value, got '%v'", val)
+			t.Errorf("expected nil value, got %v", val)
 		}
 	})
 }
 
 func TestError_GetMetadataValue(t *testing.T) {
-	err := New("test").WithMetadata("count", 5)
+	t.Parallel()
+
+	err := New(msgTest).WithMetadata("count", metadataIntValue)
 
 	val, ok := GetMetadataValue[int](err, "count")
-	if !ok || val != 5 {
-		t.Errorf("expected typed metadata 5, got %v (ok=%v)", val, ok)
+	if !ok || val != metadataIntValue {
+		t.Errorf("expected typed metadata %d, got %v (ok=%v)", metadataIntValue, val, ok)
 	}
 
 	_, ok = GetMetadataValue[int](err, "missing")
@@ -282,20 +338,13 @@ func TestError_GetMetadataValue(t *testing.T) {
 }
 
 func TestWithRecoverySuggestion(t *testing.T) {
+	t.Parallel()
+
 	mockLogger := NewMockLogger()
 	rs := &RecoverySuggestion{Message: "restart"}
-	err := New("test", WithLogger(mockLogger), WithRecoverySuggestion(rs))
+	err := New(msgTest, WithLogger(mockLogger), WithRecoverySuggestion(rs))
 
-	logs := mockLogger.GetLogs()
-	infoCount := 0
-
-	for _, l := range logs {
-		if l.Level == "info" {
-			infoCount++
-		}
-	}
-
-	if infoCount != 1 {
+	if countLogsAtLevel(mockLogger.GetLogs(), severityInfoStr) != 1 {
 		t.Error("expected info log when adding recovery suggestion")
 	}
 
@@ -306,33 +355,52 @@ func TestWithRecoverySuggestion(t *testing.T) {
 
 	err.Log()
 
-	logs = mockLogger.GetLogs()
-	found := false
-
-	for _, entry := range logs {
-		if entry.Level == "error" {
-			for i := 0; i < len(entry.Args); i += 2 {
-				if entry.Args[i] == "recovery_message" && entry.Args[i+1] == rs.Message {
-					found = true
-				}
-			}
-		}
-	}
-
-	if !found {
+	if !findRecoveryMessageInLogs(mockLogger.GetLogs(), rs.Message) {
 		t.Error("expected recovery_message in error log")
 	}
 }
 
+// countLogsAtLevel counts how many entries match the given level.
+func countLogsAtLevel(logs []LogEntry, level string) int {
+	count := 0
+
+	for _, l := range logs {
+		if l.Level == level {
+			count++
+		}
+	}
+
+	return count
+}
+
+// findRecoveryMessageInLogs scans error-level entries for a "recovery_message"
+// key whose value matches want.
+func findRecoveryMessageInLogs(logs []LogEntry, want string) bool {
+	for _, entry := range logs {
+		if entry.Level != severityErrorStr {
+			continue
+		}
+
+		for i := 0; i < len(entry.Args); i += 2 {
+			if entry.Args[i] == "recovery_message" && entry.Args[i+1] == want {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func TestError_Stack(t *testing.T) {
-	err := New("test")
+	t.Parallel()
+
+	err := New(msgTest)
 	stack := err.Stack()
 
 	if stack == "" {
 		t.Error("expected non-empty stack trace")
 	}
 
-	// Should not contain runtime frames or error package frames
 	if strings.Contains(stack, "runtime/") {
 		t.Error("stack should not contain runtime frames")
 	}
@@ -343,39 +411,48 @@ func TestError_Stack(t *testing.T) {
 }
 
 func TestError_Log(t *testing.T) {
+	t.Parallel()
+
 	t.Run("does nothing when no logger", func(t *testing.T) {
-		err := New("test")
+		t.Parallel()
+
+		err := New(msgTest)
 		err.Log() // Should not panic
 	})
 
 	t.Run("logs with logger", func(t *testing.T) {
+		t.Parallel()
+
 		mockLogger := NewMockLogger()
-		err := New("test", WithLogger(mockLogger)).WithMetadata("key", "value")
+		err := New(msgTest, WithLogger(mockLogger)).WithMetadata(msgKey, msgValue)
 		err.Log()
 
-		if mockLogger.GetCallCount("error") != 1 {
+		if mockLogger.GetCallCount(severityErrorStr) != 1 {
 			t.Error("expected error log to be called once")
 		}
 
 		logs := mockLogger.GetLogs()
-		if len(logs) < 2 { // At least creation debug log and error log
+		if len(logs) < 2 {
 			t.Error("expected at least 2 log entries")
 		}
 	})
 
 	t.Run("logs with cause", func(t *testing.T) {
+		t.Parallel()
+
 		mockLogger := NewMockLogger()
-		cause := errors.New("original")
-		err := Wrap(cause, "wrapped", WithLogger(mockLogger))
+		err := Wrap(errOriginal, msgWrapped, WithLogger(mockLogger))
 		err.Log()
 
-		if mockLogger.GetCallCount("error") != 1 {
+		if mockLogger.GetCallCount(severityErrorStr) != 1 {
 			t.Error("expected error log to be called once")
 		}
 	})
 }
 
 func TestCaptureStack(t *testing.T) {
+	t.Parallel()
+
 	stack := CaptureStack()
 	if len(stack) == 0 {
 		t.Error("expected non-empty stack trace")
@@ -383,73 +460,88 @@ func TestCaptureStack(t *testing.T) {
 }
 
 func TestError_Is(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns false for nil target", func(t *testing.T) {
-		err := New("test")
+		t.Parallel()
+
+		err := New(msgTest)
 		if errors.Is(err, nil) {
 			t.Error("expected false for nil target")
 		}
 	})
 
 	t.Run("matches sentinel error", func(t *testing.T) {
-		sentinel := errors.New("sentinel")
+		t.Parallel()
 
-		wrapped := Wrap(sentinel, "wrapped")
-		if !errors.Is(wrapped, sentinel) {
+		wrapped := Wrap(errSentinel, msgWrapped)
+		if !errors.Is(wrapped, errSentinel) {
 			t.Error("expected true for sentinel error in chain")
 		}
 	})
 
 	t.Run("matches ewrap sentinel", func(t *testing.T) {
-		sentinel := New("sentinel")
+		t.Parallel()
 
-		wrapped := Wrap(sentinel, "wrapped")
+		sentinel := New(msgSentinel)
+
+		wrapped := Wrap(sentinel, msgWrapped)
 		if !errors.Is(wrapped, sentinel) {
 			t.Error("expected true for ewrap sentinel in chain")
 		}
 	})
 
 	t.Run("prevents infinite recursion with self-reference", func(t *testing.T) {
+		t.Parallel()
+
 		err1 := New("error1")
 		err2 := New("error2")
-		// This would create a cycle if not handled properly
+
 		if errors.Is(err1, err2) {
 			t.Error("expected false for different errors")
 		}
 	})
 
 	t.Run("non-matching error", func(t *testing.T) {
-		err := New("test error")
+		t.Parallel()
 
-		target := errors.New("other")
-		if errors.Is(err, target) {
+		err := New(msgTestError)
+
+		if errors.Is(err, errOther) {
 			t.Error("expected false for non-matching error")
 		}
 	})
 }
 
 func TestError_Unwrap(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns nil for new error", func(t *testing.T) {
-		err := New("test")
+		t.Parallel()
+
+		err := New(msgTest)
 		if err.Unwrap() != nil {
 			t.Error("expected nil for new error")
 		}
 	})
 
 	t.Run("returns cause for wrapped error", func(t *testing.T) {
-		cause := errors.New("original")
+		t.Parallel()
 
-		wrapped := Wrap(cause, "wrapped")
-		if !errors.Is(wrapped.Unwrap(), cause) {
+		wrapped := Wrap(errOriginal, msgWrapped)
+		if !errors.Is(wrapped.Unwrap(), errOriginal) {
 			t.Error("expected unwrap to return cause")
 		}
 	})
 }
 
 func TestWithLogger(t *testing.T) {
+	t.Parallel()
+
 	mockLogger := NewMockLogger()
 	option := WithLogger(mockLogger)
 	err := &Error{
-		msg:      "test",
+		msg:      msgTest,
 		metadata: make(map[string]any),
 		stack:    CaptureStack(),
 	}
@@ -460,32 +552,27 @@ func TestWithLogger(t *testing.T) {
 		t.Error("expected logger to be set")
 	}
 
-	if mockLogger.GetCallCount("debug") != 1 {
+	if mockLogger.GetCallCount("debug") != expectedDebugCalls {
 		t.Error("expected debug log to be called once")
 	}
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	err := New("test")
+	t.Parallel()
 
-	// Test concurrent metadata access
+	err := New(msgTest)
+
 	var wg sync.WaitGroup
-	for i := range 100 {
-		wg.Add(2)
 
-		go func(i int) {
-			defer wg.Done()
+	for i := range concurrentMetadataIters {
+		wg.Go(func() {
+			_ = err.WithMetadata(fmt.Sprintf("key%d", i), i)
+		})
 
-			err.WithMetadata(fmt.Sprintf("key%d", i), i)
-		}(i)
-		go func(i int) {
-			defer wg.Done()
-
-			err.GetMetadata(fmt.Sprintf("key%d", i))
-		}(i)
+		wg.Go(func() {
+			_, _ = err.GetMetadata(fmt.Sprintf("key%d", i))
+		})
 	}
 
 	wg.Wait()
-
-	// Should not panic or race
 }

@@ -1,11 +1,18 @@
 package ewrap
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/goccy/go-json"
+)
+
+const (
+	deepChainDepth          = 200
+	expectedHardeningSeed   = 1024
+	hardeningExpectedSuffix = "boom"
 )
 
 // TestDeepChain verifies Error()/Stack()/Unwrap walk arbitrarily deep chains
@@ -13,25 +20,21 @@ import (
 func TestDeepChain(t *testing.T) {
 	t.Parallel()
 
-	const depth = 200
-
-	root := errors.New("root")
-
-	err := root
-	for i := range depth {
+	err := errRoot
+	for i := range deepChainDepth {
 		err = Wrap(err, fmt.Sprintf("layer-%d", i))
 	}
 
-	if !errors.Is(err, root) {
+	if !errors.Is(err, errRoot) {
 		t.Fatal("errors.Is should find root through deep chain")
 	}
 
 	msg := err.Error()
-	if !strings.Contains(msg, "root") {
+	if !strings.Contains(msg, msgRoot) {
 		t.Errorf("expected root in message, got %q", msg)
 	}
 
-	if !strings.Contains(msg, fmt.Sprintf("layer-%d", depth-1)) {
+	if !strings.Contains(msg, fmt.Sprintf("layer-%d", deepChainDepth-1)) {
 		t.Errorf("expected outermost layer in message, got %q", msg)
 	}
 
@@ -50,15 +53,13 @@ func TestDeepChain(t *testing.T) {
 func TestErrorsIs_ContractWithSentinel(t *testing.T) {
 	t.Parallel()
 
-	sentinel := errors.New("sentinel")
-	wrapped := Wrap(sentinel, "outer")
+	wrapped := Wrap(errSentinel, "outer")
 
-	if !errors.Is(wrapped, sentinel) {
+	if !errors.Is(wrapped, errSentinel) {
 		t.Error("expected sentinel match through ewrap.Wrap")
 	}
 
-	other := errors.New("sentinel") // same text, different identity
-	if errors.Is(wrapped, other) {
+	if errors.Is(wrapped, errOtherSentinel) {
 		t.Error("must not match a different error with the same text")
 	}
 }
@@ -67,15 +68,16 @@ func TestErrorsIs_ContractWithSentinel(t *testing.T) {
 func TestNewfWithW(t *testing.T) {
 	t.Parallel()
 
-	root := errors.New("root cause")
-	err := Newf("wrapped: %w", root)
+	err := Newf("wrapped: %w", errRootCause)
 
-	if !errors.Is(err, root) {
+	if !errors.Is(err, errRootCause) {
 		t.Error("errors.Is must walk through %w")
 	}
 
-	if got := err.Error(); got != "wrapped: root cause" {
-		t.Errorf("got %q, want %q", got, "wrapped: root cause")
+	const want = "wrapped: root cause"
+
+	if got := err.Error(); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -83,7 +85,7 @@ func TestNewfWithW(t *testing.T) {
 func TestWrapStackCapturesWrapSite(t *testing.T) {
 	t.Parallel()
 
-	root := New("root")
+	root := New(msgRoot)
 
 	wrapped := wrapHelper(root)
 
@@ -105,7 +107,7 @@ func wrapHelper(err error) *Error {
 
 // FuzzJSONRoundTrip checks that ToJSON is robust against arbitrary inputs.
 func FuzzJSONRoundTrip(f *testing.F) {
-	seeds := []string{"", "boom", "weird \x00 byte", strings.Repeat("a", 1024)}
+	seeds := []string{"", hardeningExpectedSuffix, "weird \x00 byte", strings.Repeat("a", expectedHardeningSeed)}
 	for _, s := range seeds {
 		f.Add(s)
 	}

@@ -1,20 +1,19 @@
 package ewrap
 
 import (
-	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-json"
 	"gopkg.in/yaml.v3"
 )
 
 func TestStackIterator(t *testing.T) {
-	// Create an error to get a stack trace
-	err := New("test error")
+	t.Parallel()
+
+	err := New(msgTestError)
 	iterator := err.GetStackIterator()
 
-	// Test HasNext and Next
 	frameCount := 0
 
 	for iterator.HasNext() {
@@ -30,19 +29,16 @@ func TestStackIterator(t *testing.T) {
 		t.Error("Expected at least one frame")
 	}
 
-	// Test that Next returns nil after iteration is complete
 	if iterator.Next() != nil {
 		t.Error("Expected nil after iteration complete")
 	}
 
-	// Test Reset
 	iterator.Reset()
 
 	if !iterator.HasNext() {
 		t.Error("Expected frames after reset")
 	}
 
-	// Test AllFrames
 	allFrames := iterator.AllFrames()
 	if len(allFrames) != frameCount {
 		t.Errorf("Expected %d frames, got %d", frameCount, len(allFrames))
@@ -50,7 +46,9 @@ func TestStackIterator(t *testing.T) {
 }
 
 func TestStackFrameStructure(t *testing.T) {
-	err := New("test error")
+	t.Parallel()
+
+	err := New(msgTestError)
 	frames := err.GetStackFrames()
 
 	if len(frames) == 0 {
@@ -76,34 +74,35 @@ func TestStackFrameStructure(t *testing.T) {
 }
 
 func TestErrorGroupSerialization(t *testing.T) {
+	t.Parallel()
+
 	eg := NewErrorGroup()
 
-	// Add different types of errors
-	eg.Add(New("ewrap error").WithMetadata("key", "value"))
+	eg.Add(New("ewrap error").WithMetadata(msgKey, msgValue))
 	eg.Add(New("another error"))
 
-	// Test ToSerialization
 	serializable := eg.ToSerialization()
 
-	if serializable.ErrorCount != 2 {
-		t.Errorf("Expected 2 errors, got %d", serializable.ErrorCount)
+	const wantCount = 2
+
+	if serializable.ErrorCount != wantCount {
+		t.Errorf("Expected %d errors, got %d", wantCount, serializable.ErrorCount)
 	}
 
-	if len(serializable.Errors) != 2 {
-		t.Errorf("Expected 2 serialized errors, got %d", len(serializable.Errors))
+	if len(serializable.Errors) != wantCount {
+		t.Errorf("Expected %d serialized errors, got %d", wantCount, len(serializable.Errors))
 	}
 
-	// Check first error
 	firstErr := serializable.Errors[0]
 	if firstErr.Type != "ewrap" {
-		t.Errorf("Expected type 'ewrap', got '%s'", firstErr.Type)
+		t.Errorf("Expected type 'ewrap', got %q", firstErr.Type)
 	}
 
 	if firstErr.Message != "ewrap error" {
-		t.Errorf("Expected message 'ewrap error', got '%s'", firstErr.Message)
+		t.Errorf("Expected message 'ewrap error', got %q", firstErr.Message)
 	}
 
-	if firstErr.Metadata == nil || firstErr.Metadata["key"] != "value" {
+	if firstErr.Metadata == nil || firstErr.Metadata[msgKey] != msgValue {
 		t.Error("Expected metadata to be preserved")
 	}
 
@@ -113,10 +112,11 @@ func TestErrorGroupSerialization(t *testing.T) {
 }
 
 func TestErrorGroupJSON(t *testing.T) {
-	eg := NewErrorGroup()
-	eg.Add(New("test error"))
+	t.Parallel()
 
-	// Test ToJSON
+	eg := NewErrorGroup()
+	eg.Add(New(msgTestError))
+
 	jsonStr, err := eg.ToJSON()
 	if err != nil {
 		t.Fatalf("Failed to convert to JSON: %v", err)
@@ -126,16 +126,16 @@ func TestErrorGroupJSON(t *testing.T) {
 		t.Error("Expected non-empty JSON string")
 	}
 
-	// Verify it's valid JSON by unmarshaling
 	var result map[string]any
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		t.Errorf("Failed to unmarshal JSON: %v", err)
+
+	unmarshalErr := json.Unmarshal([]byte(jsonStr), &result)
+	if unmarshalErr != nil {
+		t.Errorf("Failed to unmarshal JSON: %v", unmarshalErr)
 	}
 
-	// Test MarshalJSON interface
-	jsonBytes, err := json.Marshal(eg)
-	if err != nil {
-		t.Fatalf("Failed to marshal using json.Marshal: %v", err)
+	jsonBytes, marshalErr := json.Marshal(eg)
+	if marshalErr != nil {
+		t.Fatalf("Failed to marshal using json.Marshal: %v", marshalErr)
 	}
 
 	if len(jsonBytes) == 0 {
@@ -144,10 +144,11 @@ func TestErrorGroupJSON(t *testing.T) {
 }
 
 func TestErrorGroupYAML(t *testing.T) {
-	eg := NewErrorGroup()
-	eg.Add(New("test error"))
+	t.Parallel()
 
-	// Test ToYAML
+	eg := NewErrorGroup()
+	eg.Add(New(msgTestError))
+
 	yamlStr, err := eg.ToYAML()
 	if err != nil {
 		t.Fatalf("Failed to convert to YAML: %v", err)
@@ -157,16 +158,16 @@ func TestErrorGroupYAML(t *testing.T) {
 		t.Error("Expected non-empty YAML string")
 	}
 
-	// Verify it's valid YAML by unmarshaling
 	var result map[string]any
-	if err := yaml.Unmarshal([]byte(yamlStr), &result); err != nil {
-		t.Errorf("Failed to unmarshal YAML: %v", err)
+
+	unmarshalErr := yaml.Unmarshal([]byte(yamlStr), &result)
+	if unmarshalErr != nil {
+		t.Errorf("Failed to unmarshal YAML: %v", unmarshalErr)
 	}
 
-	// Test MarshalYAML interface
-	yamlData, err := yaml.Marshal(eg)
-	if err != nil {
-		t.Fatalf("Failed to marshal using yaml.Marshal: %v", err)
+	yamlData, marshalErr := yaml.Marshal(eg)
+	if marshalErr != nil {
+		t.Fatalf("Failed to marshal using yaml.Marshal: %v", marshalErr)
 	}
 
 	if len(yamlData) == 0 {
@@ -175,10 +176,11 @@ func TestErrorGroupYAML(t *testing.T) {
 }
 
 func TestErrorGroupSerializationWithWrappedErrors(t *testing.T) {
+	t.Parallel()
+
 	eg := NewErrorGroup()
 
-	// Create a chain of wrapped errors
-	rootErr := New("root cause")
+	rootErr := New(msgRootCause)
 	wrappedErr := Wrap(rootErr, "wrapped error")
 	eg.Add(wrappedErr)
 
@@ -188,25 +190,27 @@ func TestErrorGroupSerializationWithWrappedErrors(t *testing.T) {
 		t.Fatalf("Expected 1 error, got %d", len(serializable.Errors))
 	}
 
-	err := serializable.Errors[0]
-	if err.Message != "wrapped error: root cause" {
-		t.Errorf("Expected wrapped message, got '%s'", err.Message)
+	const want = "wrapped error: root cause"
+
+	got := serializable.Errors[0]
+	if got.Message != want {
+		t.Errorf("Expected message %q, got %q", want, got.Message)
 	}
 
-	if err.Cause == nil {
+	if got.Cause == nil {
 		t.Error("Expected cause to be serialized")
 	}
 
-	if err.Cause.Message != "root cause" {
-		t.Errorf("Expected cause message 'root cause', got '%s'", err.Cause.Message)
+	if got.Cause.Message != msgRootCause {
+		t.Errorf("Expected cause message %q, got %q", msgRootCause, got.Cause.Message)
 	}
 }
 
 func TestErrorGroupSerializationWithStandardErrors(t *testing.T) {
-	eg := NewErrorGroup()
+	t.Parallel()
 
-	// Add standard Go error
-	eg.Add(errors.New("standard error"))
+	eg := NewErrorGroup()
+	eg.Add(errStandard)
 
 	serializable := eg.ToSerialization()
 
@@ -214,21 +218,23 @@ func TestErrorGroupSerializationWithStandardErrors(t *testing.T) {
 		t.Fatalf("Expected 1 error, got %d", len(serializable.Errors))
 	}
 
-	err := serializable.Errors[0]
-	if err.Type != "standard" {
-		t.Errorf("Expected type 'standard', got '%s'", err.Type)
+	got := serializable.Errors[0]
+	if got.Type != "standard" {
+		t.Errorf("Expected type 'standard', got %q", got.Type)
 	}
 
-	if len(err.StackTrace) != 0 {
+	if len(got.StackTrace) != 0 {
 		t.Error("Expected no stack trace for standard error")
 	}
 
-	if err.Metadata != nil {
+	if got.Metadata != nil {
 		t.Error("Expected no metadata for standard error")
 	}
 }
 
 func TestEmptyErrorGroupSerialization(t *testing.T) {
+	t.Parallel()
+
 	eg := NewErrorGroup()
 
 	serializable := eg.ToSerialization()
@@ -241,7 +247,6 @@ func TestEmptyErrorGroupSerialization(t *testing.T) {
 		t.Errorf("Expected 0 serialized errors, got %d", len(serializable.Errors))
 	}
 
-	// Test JSON serialization of empty group
 	jsonStr, err := eg.ToJSON()
 	if err != nil {
 		t.Fatalf("Failed to serialize empty group to JSON: %v", err)
@@ -253,30 +258,37 @@ func TestEmptyErrorGroupSerialization(t *testing.T) {
 }
 
 func BenchmarkErrorGroupSerialization(b *testing.B) {
+	const errorCount = 10
+
 	eg := NewErrorGroup()
-	for i := range 10 {
+	for i := range errorCount {
 		eg.Add(New("error").WithMetadata("index", i))
 	}
 
-	b.Run("JSON", func(b *testing.B) {
-		b.ReportAllocs()
+	b.Run("JSON", func(b *testing.B) { benchSerializationJSON(b, eg) })
+	b.Run("YAML", func(b *testing.B) { benchSerializationYAML(b, eg) })
+}
 
-		for range b.N {
-			_, err := eg.ToJSON()
-			if err != nil {
-				b.Fatal(err)
-			}
+func benchSerializationJSON(b *testing.B, eg *ErrorGroup) {
+	b.Helper()
+	b.ReportAllocs()
+
+	for range b.N {
+		_, err := eg.ToJSON()
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
+	}
+}
 
-	b.Run("YAML", func(b *testing.B) {
-		b.ReportAllocs()
+func benchSerializationYAML(b *testing.B, eg *ErrorGroup) {
+	b.Helper()
+	b.ReportAllocs()
 
-		for range b.N {
-			_, err := eg.ToYAML()
-			if err != nil {
-				b.Fatal(err)
-			}
+	for range b.N {
+		_, err := eg.ToYAML()
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
+	}
 }
