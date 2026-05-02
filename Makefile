@@ -99,6 +99,10 @@ sec:
 	@echo "\nRunning gosec..."
 	gosec -exclude-generated ./...
 
+godoc:
+	@echo "Generating documentation..."
+	godoc -v -http=:8089 -play -index
+
 ci: .PHONY
 
 # check_command_exists is a helper function that checks if a command exists.
