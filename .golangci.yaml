@@ -53,17 +53,11 @@ linters:
     - gomodguard_v2
   disable:
     - depguard
-    # - embeddedstructfieldcheck
     - exhaustruct
-    # - gomoddirectives
     - gomodguard
     - ireturn
-    # - lll
     - nolintlint
     - nonamedreturns
-    # - recvcheck
-    # - tagliatelle
-    # - tagalign
     - testpackage
     - wsl
 
