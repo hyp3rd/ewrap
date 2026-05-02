@@ -1,12 +1,16 @@
 # Custom Dictionary Words
 Errorf
+ewrapslog
+glog
 goexit
 golangci
+gopkg
 monkeypatch
 myapp
 Println
 retryable
 Retryable
 Stdlib
+stdslog
 subpackages
 uintptr

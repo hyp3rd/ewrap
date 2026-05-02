@@ -33,6 +33,7 @@ dictionaries:
   - custom-dictionary
 words:
   - Atoi
+  - benchmem
   - codacy
   - daixiang
   - eamodio
@@ -52,10 +53,12 @@ words:
   - goccy
   - gofiber
   - GOFILES
+  - gofumpt
   - golines
   - gomod
   - GOPATH
   - goroutines
+  - gosec
   - GOTOOLCHAIN
   - govulncheck
   - httptest

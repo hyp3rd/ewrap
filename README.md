@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/hyp3rd/ewrap)](https://goreportcard.com/report/github.com/hyp3rd/ewrap)
 [![Go Reference](https://pkg.go.dev/badge/github.com/hyp3rd/ewrap.svg)](https://pkg.go.dev/github.com/hyp3rd/ewrap)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![GitHub Sponsors](https://img.shields.io/github/sponsors/hyp3rd/sponsors)
+![GitHub Sponsors](https://img.shields.io/github/sponsors/hyp3rd)
 
 A lightweight, modern Go error library: rich context, stack traces, structured
 serialization, `slog`/`fmt.Formatter` integration, HTTP/retry classification,
@@ -193,7 +193,7 @@ cb := breaker.NewWithObserver("payments", 5, 30*time.Second, &metrics{})
 
 ## Error types and severity
 
-Pre-defined enums for categorisation. Their `String()` form is what shows up
+Pre-defined enums for categorization. Their `String()` form is what shows up
 in `ErrorOutput.Type` / `Severity`, JSON, and `slog` fields.
 
 ```go
