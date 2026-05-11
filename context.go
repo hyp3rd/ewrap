@@ -97,7 +97,8 @@ func WithContext(ctx context.Context, errorType ErrorType, severity Severity) Op
 		err.errorContext = errorCtx
 
 		if err.logger != nil {
-			err.logger.Debug("error context added",
+			err.logger.Debug(
+				"error context added",
 				"error_type", errorType,
 				"severity", severity,
 				"request_id", errorCtx.RequestID,

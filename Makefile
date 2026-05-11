@@ -1,7 +1,7 @@
 include .project-settings.env
 
 GOLANGCI_LINT_VERSION ?= v2.12.1
-GO_VERSION ?= 1.26.2
+GO_VERSION ?= 1.26.3
 GCI_PREFIX ?= github.com/hyp3rd/ewrap
 PROTO_ENABLED ?= true
 
