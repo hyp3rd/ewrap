@@ -42,7 +42,7 @@ run:
   # Define the Go version limit.
   # Mainly related to generics support since go1.18.
   # Default: use Go version from the go.mod file, fallback on the env var `GOVERSION`, fallback on 1.17
-  go: "1.26.2"
+  go: "1.26.3"
 
 linters:
   # Enable specific linter
@@ -136,20 +136,20 @@ linters:
           disabled: false
           arguments:
             - max-lit-count: "3"
-              allow-strs: "\"\",\"-\""
+              allow-strs: '"","-"'
               allow-ints: "-1,0,1,2,10,1024,0o600,0o644,0o700,0o755,0666,0755"
               allow-floats: "0.0,1.0"
 
         - name: cognitive-complexity
           severity: warning
           disabled: false
-          arguments: [ 10 ]
+          arguments: [10]
 
         - name: cyclomatic
-          arguments: [ 15 ]
+          arguments: [15]
 
         - name: max-public-structs
-          arguments: [ 10 ]
+          arguments: [10]
 
         - name: nested-structs
           disabled: true
@@ -158,7 +158,7 @@ linters:
           disabled: true
 
         - name: line-length-limit
-          arguments: [ 140 ]
+          arguments: [140]
 
         - name: var-naming
           disabled: true
@@ -166,7 +166,7 @@ linters:
         - name: package-comments
           severity: warning
           disabled: false
-          exclude: [ "" ]
+          exclude: [""]
 
     tagliatelle:
       # Checks the struct tag name case.

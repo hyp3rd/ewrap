@@ -71,7 +71,8 @@ func WithLogger(log Logger) Option {
 		err.logger = log
 
 		if log != nil {
-			log.Debug("error created",
+			log.Debug(
+				"error created",
 				"message", err.msg,
 				"stack", err.Stack(),
 			)
@@ -258,7 +259,8 @@ func (e *Error) WithMetadata(key string, value any) *Error {
 	e.mu.Unlock()
 
 	if log != nil {
-		log.Debug("metadata added",
+		log.Debug(
+			"metadata added",
 			"key", key,
 			"value", value,
 			"error", e.msg,
@@ -273,7 +275,8 @@ func (e *Error) WithContext(ctx *ErrorContext) *Error {
 	e.errorContext = ctx
 
 	if e.logger != nil {
-		e.logger.Debug("context added",
+		e.logger.Debug(
+			"context added",
 			"context", ctx,
 			"error", e.msg,
 		)

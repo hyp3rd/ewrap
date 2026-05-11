@@ -1,7 +1,7 @@
 include .project-settings.env
 
 GOLANGCI_LINT_VERSION ?= v2.12.1
-GO_VERSION ?= 1.26.2
+GO_VERSION ?= 1.26.3
 GCI_PREFIX ?= github.com/hyp3rd/ewrap
 PROTO_ENABLED ?= true
 
@@ -13,8 +13,8 @@ test:
 test-race:
 	go test -race ./...
 
-benchmark:
-	go test -bench=. -benchmem ./pkg/ewrap
+bench:
+	go test -bench=. -benchmem ./test
 	go test -bench=Benchmark -benchmem ./test
 	# go test -run=TestProfile -cpuprofile=cpu.prof -memprofile=mem.prof ./test
 
@@ -122,7 +122,7 @@ help:
 	@echo "update-deps\t\t\tUpdate all dependencies in the project."
 	@echo "prepare-toolchain\t\tPrepare the development toolchain by installing necessary tools."
 	@echo "update-toolchain\t\tUpdate the development toolchain tools to their latest versions."
-	@echo "benchmark\t\t\tRun benchmarks for the project."
+	@echo "bench\t\t\t\tRun benchmarks for the project."
 	@echo "sec\t\t\t\tRun the govulncheck and gosec security analysis tools on all packages in the project."
 	@echo "vet\t\t\t\tRun go vet and shadow analysis on all packages in the project."
 	@echo "lint\t\t\t\tRun the staticcheck and golangci-lint static analysis tools on all packages in the project."
@@ -131,4 +131,4 @@ help:
 	@echo
 	@echo "For more information, see the project README."
 
-.PHONY: update-deps lint sec test test-race benchmark
+.PHONY: update-deps lint sec test test-race bench
