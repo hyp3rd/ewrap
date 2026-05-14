@@ -37,7 +37,8 @@ func (e *Error) LogValue() slog.Value {
 	}
 
 	if ctx := e.errorContext; ctx != nil {
-		attrs = append(attrs,
+		attrs = append(
+			attrs,
 			slog.String("type", ctx.Type.String()),
 			slog.String("severity", ctx.Severity.String()),
 		)
