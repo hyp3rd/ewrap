@@ -189,8 +189,7 @@ func wrapAt(skip int, err error, msg string, opts ...Option) *Error {
 		stack: capturePCs(skip, defaultStackDepth),
 	}
 
-	var inner *Error
-	if errors.As(err, &inner) {
+	if inner, ok := errors.AsType[*Error](err); ok {
 		inner.mu.RLock()
 
 		if len(inner.metadata) > 0 {
