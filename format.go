@@ -93,8 +93,7 @@ func (e *Error) toErrorOutput(opts ...FormatOption) *ErrorOutput {
 	}
 
 	if e.cause != nil {
-		var wrappedErr *Error
-		if errors.As(e.cause, &wrappedErr) {
+		if wrappedErr, ok := errors.AsType[*Error](e.cause); ok {
 			output.Cause = wrappedErr.toErrorOutput(opts...)
 		} else {
 			output.Cause = standardErrorOutput(e.cause)
@@ -119,8 +118,7 @@ func standardErrorOutput(err error) *ErrorOutput {
 
 	cause := errors.Unwrap(err)
 	if cause != nil {
-		var wrappedErr *Error
-		if errors.As(cause, &wrappedErr) {
+		if wrappedErr, ok := errors.AsType[*Error](cause); ok {
 			out.Cause = wrappedErr.toErrorOutput()
 		} else {
 			out.Cause = standardErrorOutput(cause)

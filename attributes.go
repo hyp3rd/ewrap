@@ -54,8 +54,7 @@ func (e *Error) Retryable() (value, set bool) {
 // similar) when no explicit value has been set.
 func IsRetryable(err error) bool {
 	for cur := err; cur != nil; cur = errors.Unwrap(cur) {
-		var e *Error
-		if errors.As(cur, &e) {
+		if e, ok := errors.AsType[*Error](cur); ok {
 			if v, set := e.Retryable(); set {
 				return v
 			}
