@@ -51,6 +51,7 @@ words:
   - Getenv
   - gocache
   - goccy
+  - goconst
   - gofiber
   - GOFILES
   - gofumpt
