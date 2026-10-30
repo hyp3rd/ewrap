@@ -17,6 +17,7 @@ const (
 	benchAddErrorCount    = 10
 	benchBreakerFailLimit = 5
 	benchBreakerLargeMax  = 1000
+	msgTestError          = "test error"
 )
 
 var errBaseBench = errors.New("base error")
@@ -145,7 +146,7 @@ func BenchmarkErrorGroup(b *testing.B) {
 
 // BenchmarkFormatting measures the performance of error formatting.
 func BenchmarkFormatting(b *testing.B) {
-	err := ewrap.New("test error",
+	err := ewrap.New(msgTestError,
 		ewrap.WithContext(context.Background(), ewrap.ErrorTypeDatabase, ewrap.SeverityError)).
 		WithMetadata("key1", "value1").
 		WithMetadata("key2", benchMetadataIntValue)
@@ -218,7 +219,7 @@ func BenchmarkMetadataOperations(b *testing.B) {
 		b.ReportAllocs()
 
 		for range b.N {
-			err := ewrap.New("test error")
+			err := ewrap.New(msgTestError)
 			for j := range benchMetadataKeys {
 				_ = err.WithMetadata(fmt.Sprintf("key%d", j), j)
 			}
@@ -226,7 +227,7 @@ func BenchmarkMetadataOperations(b *testing.B) {
 	})
 
 	b.Run("GetMetadata", func(b *testing.B) {
-		err := ewrap.New("test error")
+		err := ewrap.New(msgTestError)
 		for i := range benchMetadataKeys {
 			_ = err.WithMetadata(fmt.Sprintf("key%d", i), i)
 		}
@@ -242,7 +243,7 @@ func BenchmarkMetadataOperations(b *testing.B) {
 
 // BenchmarkStackTrace measures the performance of stack trace operations.
 func BenchmarkStackTrace(b *testing.B) {
-	err := ewrap.New("test error")
+	err := ewrap.New(msgTestError)
 
 	b.Run("CaptureStack", func(b *testing.B) {
 		b.ReportAllocs()

@@ -70,12 +70,10 @@ func TestConcurrentPoolUsage(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(concurrentPoolGoroutines)
-
 	for i := range concurrentPoolGoroutines {
-		go func(id int) {
-			defer wg.Done()
+		id := i
 
+		wg.Go(func() {
 			eg := pool.Get()
 			defer eg.Release()
 
@@ -84,7 +82,7 @@ func TestConcurrentPoolUsage(t *testing.T) {
 			if !eg.HasErrors() {
 				t.Errorf("Expected errors in group %d", id)
 			}
-		}(i)
+		})
 	}
 
 	wg.Wait()

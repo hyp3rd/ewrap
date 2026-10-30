@@ -2,32 +2,28 @@ package ewrap
 
 import "errors"
 
-// Shared test fixtures. Centralising these silences goconst/revive
+// Shared test fixtures. Centralizing these silences goconst/revive
 // add-constant warnings and keeps tests readable.
 
 const (
-	msgTest         = "test"
-	msgTestError    = "test error"
-	msgBoom         = "boom"
-	msgKey          = "key"
-	msgValue        = "value"
-	msgSomeStack    = "some stack trace"
-	msgOriginal     = "original"
-	msgOriginalErr  = "original error"
-	msgCauseError   = "cause error"
-	msgFirst        = "first"
-	msgSecond       = "second"
-	msgRoot         = "root"
-	msgRootCause    = "root cause"
-	msgPlain        = "plain"
-	msgSentinel     = "sentinel"
-	msgWrapped      = "wrapped"
-	msgStandardErr  = "standard error"
-	msgErrorMessage = "error message"
-
+	msgTest            = "test"
+	msgTestError       = "test error"
+	msgBoom            = "boom"
+	msgKey             = "key"
+	msgValue           = "value"
+	msgSomeStack       = "some stack trace"
+	msgOriginal        = "original"
+	msgOriginalErr     = "original error"
+	msgCauseError      = "cause error"
+	msgFirst           = "first"
+	msgSecond          = "second"
+	msgRoot            = "root"
+	msgRootCause       = "root cause"
+	msgPlain           = "plain"
+	msgSentinel        = "sentinel"
+	msgWrapped         = "wrapped"
+	msgStandardErr     = "standard error"
 	defaultMaxAttempts = 3
-	smallStringLength  = 100
-	concurrencyLimit   = 100
 )
 
 var (

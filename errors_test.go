@@ -14,6 +14,8 @@ const (
 	wrapfFormat             = "wrapped %d"
 	expectedDebugCalls      = 1
 	metadataIntValue        = 5
+	errMsgExpectedGot       = "expected %q, got %q"
+	debugLogLevel           = "debug"
 )
 
 // MockLogger implements the Logger interface for testing.
@@ -49,8 +51,8 @@ func (m *MockLogger) Debug(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.logs = append(m.logs, LogEntry{Level: "debug", Msg: msg, Args: args})
-	m.called["debug"]++
+	m.logs = append(m.logs, LogEntry{Level: debugLogLevel, Msg: msg, Args: args})
+	m.called[debugLogLevel]++
 }
 
 func (m *MockLogger) Error(msg string, args ...any) {
@@ -87,7 +89,7 @@ func testNewCreates(t *testing.T) {
 
 	err := New(msgTestError)
 	if err.Error() != msgTestError {
-		t.Errorf("expected %q, got %q", msgTestError, err.Error())
+		t.Errorf(errMsgExpectedGot, msgTestError, err.Error())
 	}
 
 	if len(err.stack) == 0 {
@@ -115,7 +117,7 @@ func testNewAppliesOptions(t *testing.T) {
 		t.Error("expected logger to be set")
 	}
 
-	if mockLogger.GetCallCount("debug") != expectedDebugCalls {
+	if mockLogger.GetCallCount(debugLogLevel) != expectedDebugCalls {
 		t.Error("expected logger debug to be called once")
 	}
 }
@@ -127,7 +129,7 @@ func TestNewf(t *testing.T) {
 
 	expected := fmt.Sprintf("test error %d", formatNumber)
 	if err.Error() != expected {
-		t.Errorf("expected %q, got %q", expected, err.Error())
+		t.Errorf(errMsgExpectedGot, expected, err.Error())
 	}
 }
 
@@ -163,7 +165,7 @@ func testWrapStandard(t *testing.T) {
 
 	expected := msgWrapped + ": " + msgOriginalErr
 	if wrapped.Error() != expected {
-		t.Errorf("expected %q, got %q", expected, wrapped.Error())
+		t.Errorf(errMsgExpectedGot, expected, wrapped.Error())
 	}
 }
 
@@ -201,7 +203,7 @@ func TestWrapf(t *testing.T) {
 
 		expected := fmt.Sprintf(wrapfFormat+": "+msgOriginal, formatNumber)
 		if wrapped.Error() != expected {
-			t.Errorf("expected %q, got %q", expected, wrapped.Error())
+			t.Errorf(errMsgExpectedGot, expected, wrapped.Error())
 		}
 	})
 }
@@ -225,7 +227,7 @@ func TestError_Error(t *testing.T) {
 
 		expected := msgWrapped + ": " + msgCauseError
 		if err.Error() != expected {
-			t.Errorf("expected %q, got %q", expected, err.Error())
+			t.Errorf(errMsgExpectedGot, expected, err.Error())
 		}
 	})
 }
@@ -552,7 +554,7 @@ func TestWithLogger(t *testing.T) {
 		t.Error("expected logger to be set")
 	}
 
-	if mockLogger.GetCallCount("debug") != expectedDebugCalls {
+	if mockLogger.GetCallCount(debugLogLevel) != expectedDebugCalls {
 		t.Error("expected debug log to be called once")
 	}
 }
